@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 4 — Caching Layer
-## Current PR: Epic 4 PR-0 (first PR of Epic 4)
+## Current Epic: 5 — CLI MVP
+## Current PR: Epic 5 PR-0 (first PR of Epic 5)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -113,6 +113,18 @@
   boundaries with file header preservation. `merge_pass2_outputs` deduplicates categories,
   concatenates summaries/details. `AnalysisEngine` auto-splits files exceeding
   `max_file_context` lines. 73 total tests pass. PR #14 on GitHub.
+
+- **Epic 4 PR-0**: SQLite cache store implemented in `src/cache/mod.rs`. `CacheStore`
+  wrapping `rusqlite::Connection`, `CacheKey` struct, `CacheError` enum. Two tables
+  (`pass1_cache`, `pass2_cache`) with schema version filtering for auto-invalidation.
+  Store/retrieve/list methods. `open_in_memory()` for tests. 7 new tests, 80 total pass.
+  PR #15 on GitHub.
+
+- **Epic 4 PR-1**: Cache integration with analysis engine. `AnalysisEngine` accepts
+  `Option<CacheStore>` and `refresh: bool`. Full/partial cache hits skip LLM calls.
+  `--refresh` flag bypasses reads but still writes. `PrContext` struct for cache key
+  construction. `base_sha`/`head_sha` added to `PullRequest` and `GithubClient`.
+  `get_pull_request()` method added. 84 total tests pass. PR #16 on GitHub.
 
 ## In Progress
 (none)
@@ -251,7 +263,6 @@
   noting if Gemini CLI ever gains network-rate-limit behavior.
 
 ## Next Steps
-- Epic 4 PR-0: SQLite cache store — `CacheStore` wrapping rusqlite, `CacheKey`,
-  store/retrieve Pass 1 and Pass 2 results, schema version invalidation.
-- Epic 4 PR-1: Cache integration with analysis engine and `--refresh` CLI flag.
-- Epic 5: CLI MVP — diff parser, TUI PR/filter selection, filtered diff output.
+- Epic 5 PR-0: Unified diff parser in `src/diff/mod.rs`.
+- Epic 5 PR-1: TUI PR selection and filter selection via `dialoguer`.
+- Epic 5 PR-2: Filtered diff output, token estimation, complete CLI MVP.

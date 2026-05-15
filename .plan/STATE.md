@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 2 — LLM Provider Abstraction
-## Current PR: Epic 2 PR-3 (Schema types + dispatcher + config wiring)
+## Current Epic: 3 — Two-Pass Analysis Engine
+## Current PR: Epic 3 PR-0 (first PR of Epic 3)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -81,6 +81,17 @@
   closure requires double-clone of `Option<String>` model — outer clone into closure,
   inner clone per invocation. 6 unit tests cover all retry scenarios + prompt
   construction. 38 total tests pass. PR #9 on GitHub.
+
+- **Epic 2 PR-3**: Output schema types, `LlmDispatcher`, and config wiring.
+  `Pass1Output`, `Pass2Output`, `FileCluster` with `#[derive(JsonSchema, Serialize,
+  Deserialize)]` added to `src/llm/schema/mod.rs`. `schema_for_pass1()` /
+  `schema_for_pass2()` return `serde_json::Value` via `schemars::schema_for!`.
+  `LlmDispatcher { default, fallback }` and `create_dispatcher(config)` factory
+  added to `src/llm/mod.rs`; `provider_from_config` maps all three `Provider` enum
+  variants. `main.rs` calls `create_dispatcher` and logs the active provider at info
+  level. Module-wide `#![allow(dead_code)]` removed from `src/llm/mod.rs`; replaced
+  with targeted item-level suppressions across the llm module tree. 44 total tests
+  pass. PR #10 on GitHub.
 
 ## In Progress
 (none)
@@ -168,6 +179,19 @@
 - **Epic 2 PR-0 — `analyze()` accepts `&str` prompt**: Open question resolved as
   "plain `&str`" — structure (system vs user prompt separation) deferred to Epic 3.
 
+- **Epic 2 PR-3 — module-wide `#![allow(dead_code)]` on submodule files**: The spec
+  said to use item-level suppressions. For `claude.rs`, `codex.rs`, and `gemini.rs`,
+  all items are uniformly unreachable from `main()` until Epic 3, so module-wide
+  suppression was used on those files for maintainability. Items in `mod.rs` and
+  `schema/mod.rs` got per-item `#[allow(dead_code)]` as specified.
+- **Epic 2 PR-3 — model overrides deferred**: `provider_from_config` hardcodes
+  `model: None` for all providers. `LlmConfig` does not yet have per-provider model
+  fields. Will be added in Epic 3 when prompts are constructed and model selection
+  matters.
+- **Epic 2 PR-3 — `fallback_name()` skipped**: `LlmDispatcher` does not expose a
+  `fallback_name() -> Option<&str>` method; `main.rs` doesn't need it. Can be added
+  later if logging the fallback at startup becomes useful.
+
 ## Known Issues / Tech Debt
 - **Epic 1 PR-0 — SCP detector is a heuristic**: `parse_remote_url` detects
   SSH SCP-style URLs via `url.contains('@') && url.contains(':')`. A URL like
@@ -206,8 +230,7 @@
   noting if Gemini CLI ever gains network-rate-limit behavior.
 
 ## Next Steps
-- Epic 2 PR-3: Output schema types + dispatcher + config wiring — `Pass1Output`,
-  `Pass2Output`, `FileCluster` (with `JsonSchema` derives), `schema_for_pass1/2()`
-  helpers in `src/llm/schema/mod.rs`; `LlmDispatcher` with fallback in `src/llm/mod.rs`;
-  `create_dispatcher(config)` factory; wire dispatcher into `main.rs`; remove
-  `#![allow(dead_code)]`.
+- Epic 3 PR-0: Two-pass analysis engine — prompt construction for Pass 1 and Pass 2,
+  Pass 2 parallel execution via `tokio::spawn`, category/tag types in `src/categories/`,
+  large-PR handling, hunk splitting for oversized files. See `.plan/3-analysis-engine/`
+  (plan files not yet written).

@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 5 — CLI MVP
-## Current PR: Epic 5 PR-0 (first PR of Epic 5)
+## Current Epic: 5 — CLI MVP (COMPLETE)
+## Next Epic: 6 — BitBucket Cloud Support
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -125,6 +125,19 @@
   `--refresh` flag bypasses reads but still writes. `PrContext` struct for cache key
   construction. `base_sha`/`head_sha` added to `PullRequest` and `GithubClient`.
   `get_pull_request()` method added. 84 total tests pass. PR #16 on GitHub.
+
+- **Epic 5 PR-0**: Unified diff parser in `src/diff/mod.rs`. `DiffFile`, `DiffHunk`,
+  `DiffLine` types. `parse_diff()` handles adds, deletes, renames, binary files,
+  multi-hunk files. 10 new tests. 94 total pass. PR #17 on GitHub.
+
+- **Epic 5 PR-1**: TUI for PR selection and filter selection via `dialoguer`. `select_pr`,
+  `display_summary`, `select_filters` functions. Interactive vs non-interactive mode
+  detection via `atty`. Restructured main flow. 97 total tests pass. PR #18 on GitHub.
+
+- **Epic 5 PR-2**: Filtered diff output, token estimation — CLI MVP complete.
+  `filter_files`, `render_filtered_diff` (ANSI colors), `estimate_tokens`, `confirm_large_pr`.
+  Full MVP flow: select PR → estimate → confirm → analyze → summarize → filter → render.
+  104 total tests pass. PR #19 on GitHub.
 
 ## In Progress
 (none)
@@ -263,6 +276,5 @@
   noting if Gemini CLI ever gains network-rate-limit behavior.
 
 ## Next Steps
-- Epic 5 PR-0: Unified diff parser in `src/diff/mod.rs`.
-- Epic 5 PR-1: TUI PR selection and filter selection via `dialoguer`.
-- Epic 5 PR-2: Filtered diff output, token estimation, complete CLI MVP.
+- Epic 6: BitBucket Cloud Support — REST API client, remote URL parsing, platform
+  auto-detection for both GitHub and BitBucket.

@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 0 — Project Scaffold
-## Current PR: PR-2
+## Current Epic: 1 — Git & Diff Layer
+## Current PR: (none — starting Epic 1)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -20,6 +20,11 @@
   (`.easy-diff/config.toml`). `ConfigError` via `thiserror`. 7 unit tests.
   `main.rs` wires up config loading and logs resolved provider at info level.
   Added deps: `dirs = "5"`, dev-dep `tempfile = "3"`. PR #2 on GitHub.
+- **PR-2**: CI workflow aligned to spec. Replaced `actions/cache@v4` with
+  `Swatinem/rust-cache@v2`. Switched build step to `cargo build --all-targets`.
+  Removed push branch filter (now triggers on every branch). Job renamed to
+  `check` / "Build & Check" per spec. `RUST_BACKTRACE` env var removed (not in
+  spec). `cargo audit` deferred per spec guidance. PR #3 on GitHub.
 
 ## In Progress
 (none)
@@ -49,9 +54,18 @@
 - **Per-repo token overrides not supported**: Open question in PR-1 spec.
   Tokens (GitHub, Bitbucket) are global-only; `RawRepoConfig` exposes only
   `llm` and `preferences` overrides.
+- **PR-2 CI was partially shipped in PR-0**: PR-0 included a functional CI
+  workflow but used `actions/cache@v4` with manual paths, a push branch filter,
+  and `--locked` flags. PR-2 replaced this with the spec-prescribed setup:
+  `Swatinem/rust-cache@v2`, push on any branch, `cargo build --all-targets`.
+- **`cargo audit` deferred**: Open question in PR-2 spec resolved as "later" —
+  the spec itself leaned toward deferral; adds tool install overhead for minimal
+  benefit at the current project size.
+- **`Swatinem/rust-cache` not pinned**: Using `@v2` tracking latest v2.x as
+  the spec recommended.
 
 ## Known Issues / Tech Debt
 (none)
 
 ## Next Steps
-- PR-2: (slot freed by CI shipping in PR-0) — available for next Epic 0 work or can be skipped.
+- Epic 1: Git & Diff Layer — start with PR-1 of Epic 1 (git module).

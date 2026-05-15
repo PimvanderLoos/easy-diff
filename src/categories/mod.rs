@@ -1,2 +1,212 @@
 //! Change Type and Attention Tag category system: built-in definitions,
 //! types, and the logic for matching files to categories.
+//!
+//! This module provides the two core enums used throughout the analysis pipeline:
+//! - [`ChangeType`]: classifies what kind of change a file or PR represents.
+//! - [`AttentionTag`]: flags areas that require special reviewer attention.
+//!
+//! Both enums serialize to/from kebab-case strings (e.g. `"bug-fix"`, `"breaking-change"`)
+//! and implement [`std::fmt::Display`] returning the same representation, making them
+//! safe to embed in LLM prompts and JSON schemas alike.
+//!
+//! # Example
+//! ```rust
+//! use easy_diff::categories::{ChangeType, AttentionTag};
+//!
+//! assert_eq!(format!("{}", ChangeType::BugFix), "bug-fix");
+//! assert_eq!(ChangeType::all().len(), 10);
+//! assert_eq!(AttentionTag::all().len(), 7);
+//! ```
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Classification of the type of change a file (or PR) represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChangeType {
+    /// A new user-visible feature.
+    Feature,
+    /// A bug fix.
+    BugFix,
+    /// Internal restructuring without behaviour change.
+    Refactor,
+    /// Addition or modification of tests.
+    Test,
+    /// Documentation-only changes.
+    Docs,
+    /// Code style / formatting changes.
+    Style,
+    /// Maintenance tasks (build scripts, CI, tooling).
+    Chore,
+    /// Changes that measurably improve performance.
+    Performance,
+    /// Security-hardening changes.
+    Security,
+    /// Dependency additions, removals, or upgrades.
+    Dependency,
+}
+
+impl ChangeType {
+    /// Returns all variants in declaration order. Useful for prompt construction
+    /// and exhaustive filtering.
+    #[allow(dead_code)]
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Feature,
+            Self::BugFix,
+            Self::Refactor,
+            Self::Test,
+            Self::Docs,
+            Self::Style,
+            Self::Chore,
+            Self::Performance,
+            Self::Security,
+            Self::Dependency,
+        ]
+    }
+}
+
+impl fmt::Display for ChangeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Delegate to serde's kebab-case representation so Display always matches
+        // the serialised form.
+        let s = serde_json::to_value(self)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| format!("{self:?}").to_lowercase());
+        f.write_str(&s)
+    }
+}
+
+/// Tags that flag areas requiring reviewer attention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum AttentionTag {
+    /// Change has security implications.
+    Security,
+    /// Change breaks backward compatibility.
+    BreakingChange,
+    /// Change is not yet covered by tests.
+    NeedsTest,
+    /// Change introduces notable complexity.
+    Complexity,
+    /// Change is unrelated to the PR's stated purpose.
+    OffTopic,
+    /// Minor style or naming issue — low priority.
+    Nitpick,
+    /// Change embeds a significant design decision worth discussing.
+    DesignDecision,
+}
+
+impl AttentionTag {
+    /// Returns all variants in declaration order. Useful for prompt construction
+    /// and exhaustive filtering.
+    #[allow(dead_code)]
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::Security,
+            Self::BreakingChange,
+            Self::NeedsTest,
+            Self::Complexity,
+            Self::OffTopic,
+            Self::Nitpick,
+            Self::DesignDecision,
+        ]
+    }
+}
+
+impl fmt::Display for AttentionTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = serde_json::to_value(self)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| format!("{self:?}").to_lowercase());
+        f.write_str(&s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_type_serializes_to_kebab_case() {
+        // setup + execute
+        let json = serde_json::to_string(&ChangeType::BugFix).expect("serialize");
+
+        // verify
+        assert_eq!(json, r#""bug-fix""#);
+    }
+
+    #[test]
+    fn attention_tag_serializes_to_kebab_case() {
+        // setup + execute
+        let json = serde_json::to_string(&AttentionTag::BreakingChange).expect("serialize");
+
+        // verify
+        assert_eq!(json, r#""breaking-change""#);
+    }
+
+    #[test]
+    fn change_type_display_matches_serde() {
+        // setup + execute + verify
+        assert_eq!(format!("{}", ChangeType::BugFix), "bug-fix");
+        assert_eq!(format!("{}", ChangeType::Feature), "feature");
+        assert_eq!(format!("{}", ChangeType::Performance), "performance");
+        assert_eq!(format!("{}", ChangeType::Dependency), "dependency");
+    }
+
+    #[test]
+    fn attention_tag_display_matches_serde() {
+        // setup + execute + verify
+        assert_eq!(
+            format!("{}", AttentionTag::BreakingChange),
+            "breaking-change"
+        );
+        assert_eq!(format!("{}", AttentionTag::Security), "security");
+        assert_eq!(
+            format!("{}", AttentionTag::DesignDecision),
+            "design-decision"
+        );
+    }
+
+    #[test]
+    fn change_type_round_trips() {
+        // setup + execute + verify
+        for variant in ChangeType::all() {
+            let json = serde_json::to_value(variant).expect("serialize");
+            let decoded: ChangeType = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(&decoded, variant);
+        }
+    }
+
+    #[test]
+    fn attention_tag_round_trips() {
+        // setup + execute + verify
+        for variant in AttentionTag::all() {
+            let json = serde_json::to_value(variant).expect("serialize");
+            let decoded: AttentionTag = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(&decoded, variant);
+        }
+    }
+
+    #[test]
+    fn all_change_types_returns_all_variants() {
+        // setup + execute
+        let all = ChangeType::all();
+
+        // verify — update this count when adding new variants
+        assert_eq!(all.len(), 10);
+    }
+
+    #[test]
+    fn all_attention_tags_returns_all_variants() {
+        // setup + execute
+        let all = AttentionTag::all();
+
+        // verify — update this count when adding new variants
+        assert_eq!(all.len(), 7);
+    }
+}

@@ -49,6 +49,23 @@ pub enum ChangeType {
 }
 
 impl ChangeType {
+    /// Returns a short description (< 15 words) suitable for embedding in LLM prompts.
+    #[allow(dead_code)]
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Feature => "A new user-visible capability or behaviour.",
+            Self::BugFix => "Corrects an unintended or erroneous behaviour.",
+            Self::Refactor => "Internal restructuring without observable behaviour change.",
+            Self::Test => "Adds or modifies automated tests.",
+            Self::Docs => "Documentation-only changes, no code logic altered.",
+            Self::Style => "Code style or formatting changes only.",
+            Self::Chore => "Maintenance: build scripts, CI, tooling.",
+            Self::Performance => "Measurably improves runtime or memory performance.",
+            Self::Security => "Hardens the code against security threats.",
+            Self::Dependency => "Adds, removes, or upgrades a dependency.",
+        }
+    }
+
     /// Returns all variants in declaration order. Useful for prompt construction
     /// and exhaustive filtering.
     #[allow(dead_code)]
@@ -101,6 +118,20 @@ pub enum AttentionTag {
 }
 
 impl AttentionTag {
+    /// Returns a short description (< 15 words) suitable for embedding in LLM prompts.
+    #[allow(dead_code)]
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Security => "Has security implications; requires careful review.",
+            Self::BreakingChange => "Breaks backward compatibility for callers or consumers.",
+            Self::NeedsTest => "The change is not yet covered by automated tests.",
+            Self::Complexity => "Introduces notable algorithmic or structural complexity.",
+            Self::OffTopic => "Unrelated to the PR's stated purpose.",
+            Self::Nitpick => "Minor style or naming issue; low priority.",
+            Self::DesignDecision => "Embeds a significant design choice worth discussing.",
+        }
+    }
+
     /// Returns all variants in declaration order. Useful for prompt construction
     /// and exhaustive filtering.
     #[allow(dead_code)]

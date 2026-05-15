@@ -4,6 +4,11 @@
 //! The primary entry point is [`parse_diff`], which converts a raw unified diff
 //! string (as returned by `git diff` or a GitHub API) into a `Vec<DiffFile>`.
 //!
+//! Additional helpers:
+//! - [`filter_files`]: select files matching chosen [`ChangeType`]s or [`AttentionTag`]s.
+//! - [`render_filtered_diff`]: render the selected files as a coloured unified diff.
+//! - [`estimate_tokens`]: rough token count estimate for a diff string.
+//!
 //! # Example
 //!
 //! ```text
@@ -12,11 +17,12 @@
 //! assert_eq!(files.len(), 1);
 //! ```
 
-// Public types and functions are part of the diff module's API and will be
-// consumed by future PRs (filtered output, TUI). Suppress dead_code until then.
-#![allow(dead_code)]
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+
+use crate::categories::{AttentionTag, ChangeType};
+use crate::llm::schema::Pass2Output;
 
 /// A parsed file entry within a unified diff.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +97,114 @@ pub fn parse_diff(diff: &str) -> Vec<DiffFile> {
     }
 
     files
+}
+
+// ---------------------------------------------------------------------------
+// Public filtering and rendering helpers
+// ---------------------------------------------------------------------------
+
+/// Filters parsed diff files to include only those whose analysis result
+/// contains at least one matching change type **or** at least one matching
+/// attention tag.
+///
+/// Files with no analysis entry are excluded.
+pub fn filter_files(
+    files: &[DiffFile],
+    analysis: &HashMap<String, Pass2Output>,
+    change_types: &[ChangeType],
+    attention_tags: &[AttentionTag],
+) -> Vec<DiffFile> {
+    files
+        .iter()
+        .filter(|f| {
+            let Some(out) = analysis.get(&f.path) else {
+                return false;
+            };
+            let matches_change_type = out.change_types.iter().any(|ct| change_types.contains(ct));
+            let matches_tag = out
+                .attention_tags
+                .iter()
+                .any(|tag| attention_tags.contains(tag));
+            matches_change_type || matches_tag
+        })
+        .cloned()
+        .collect()
+}
+
+/// Renders filtered diff files as unified diff text with ANSI colour.
+///
+/// - Added lines: green (`\x1b[32m`).
+/// - Removed lines: red (`\x1b[31m`).
+/// - Context lines: dim (`\x1b[2m`).
+/// - File headers: bold, plus a `# Summary:` comment line when an analysis
+///   entry is available for the file.
+pub fn render_filtered_diff(files: &[DiffFile], analysis: &HashMap<String, Pass2Output>) -> String {
+    const RESET: &str = "\x1b[0m";
+    const GREEN: &str = "\x1b[32m";
+    const RED: &str = "\x1b[31m";
+    const DIM: &str = "\x1b[2m";
+    const BOLD: &str = "\x1b[1m";
+
+    let mut out = String::new();
+
+    for file in files {
+        let old_path = file.old_path.as_deref().unwrap_or(file.path.as_str());
+
+        // Coloured `diff --git` header line.
+        out.push_str(&format!(
+            "{BOLD}diff --git a/{old} b/{new}{RESET}\n",
+            old = old_path,
+            new = file.path
+        ));
+
+        // Optional per-file summary comment.
+        if let Some(entry) = analysis.get(&file.path) {
+            out.push_str(&format!("{DIM}# Summary: {}{RESET}\n", entry.summary));
+            if !entry.attention_tags.is_empty() {
+                let tags: Vec<String> =
+                    entry.attention_tags.iter().map(|t| t.to_string()).collect();
+                out.push_str(&format!("{DIM}# Tags: {}{RESET}\n", tags.join(", ")));
+            }
+        }
+
+        // `--- a/<path>` / `+++ b/<path>` lines.
+        if file.is_new {
+            out.push_str(&format!("{BOLD}--- /dev/null{RESET}\n"));
+        } else {
+            out.push_str(&format!("{BOLD}--- a/{}{RESET}\n", old_path));
+        }
+        if file.is_deleted {
+            out.push_str(&format!("{BOLD}+++ /dev/null{RESET}\n"));
+        } else {
+            out.push_str(&format!("{BOLD}+++ b/{}{RESET}\n", file.path));
+        }
+
+        // Hunks.
+        for hunk in &file.hunks {
+            out.push_str(&format!("{DIM}{}{RESET}\n", hunk.header));
+            for line in &hunk.lines {
+                match line {
+                    DiffLine::Added(content) => {
+                        out.push_str(&format!("{GREEN}+{content}{RESET}\n"));
+                    }
+                    DiffLine::Removed(content) => {
+                        out.push_str(&format!("{RED}-{content}{RESET}\n"));
+                    }
+                    DiffLine::Context(content) => {
+                        out.push_str(&format!("{DIM} {content}{RESET}\n"));
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Estimates the token count for a diff string using a simple heuristic:
+/// approximately 4 characters per token.
+pub fn estimate_tokens(diff: &str) -> usize {
+    diff.len() / 4
 }
 
 // ---------------------------------------------------------------------------
@@ -517,6 +631,158 @@ Binary files a/assets/logo.png and b/assets/logo.png differ
 
         // verify
         assert!(files.is_empty(), "empty input should produce empty vec");
+    }
+
+    // -----------------------------------------------------------------------
+    // filter_files tests
+    // -----------------------------------------------------------------------
+
+    fn make_pass2(change_types: Vec<ChangeType>, attention_tags: Vec<AttentionTag>) -> Pass2Output {
+        Pass2Output {
+            summary: "test".into(),
+            change_types,
+            attention_tags,
+            details: vec![],
+        }
+    }
+
+    fn make_diff_file(path: &str) -> DiffFile {
+        DiffFile {
+            path: path.into(),
+            old_path: None,
+            hunks: vec![],
+            is_new: false,
+            is_deleted: false,
+        }
+    }
+
+    #[test]
+    fn filter_files_includes_matching() {
+        // setup
+        let files = vec![make_diff_file("src/a.rs")];
+        let mut analysis = HashMap::new();
+        analysis.insert(
+            "src/a.rs".into(),
+            make_pass2(vec![ChangeType::Feature], vec![]),
+        );
+
+        // execute
+        let result = filter_files(&files, &analysis, &[ChangeType::Feature], &[]);
+
+        // verify
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, "src/a.rs");
+    }
+
+    #[test]
+    fn filter_files_excludes_non_matching() {
+        // setup
+        let files = vec![make_diff_file("src/a.rs")];
+        let mut analysis = HashMap::new();
+        analysis.insert(
+            "src/a.rs".into(),
+            make_pass2(vec![ChangeType::Docs], vec![]),
+        );
+
+        // execute — filter for Feature only; file is Docs
+        let result = filter_files(&files, &analysis, &[ChangeType::Feature], &[]);
+
+        // verify
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_files_matches_on_tag() {
+        // setup — change type does NOT match, but tag does
+        let files = vec![make_diff_file("src/a.rs")];
+        let mut analysis = HashMap::new();
+        analysis.insert(
+            "src/a.rs".into(),
+            make_pass2(vec![ChangeType::Docs], vec![AttentionTag::Security]),
+        );
+
+        // execute
+        let result = filter_files(
+            &files,
+            &analysis,
+            &[ChangeType::Feature],
+            &[AttentionTag::Security],
+        );
+
+        // verify — file should be included due to matching tag
+        assert_eq!(result.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // estimate_tokens tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn estimate_tokens_basic() {
+        // setup
+        let diff = "a".repeat(400);
+
+        // execute
+        let tokens = estimate_tokens(&diff);
+
+        // verify
+        assert_eq!(tokens, 100);
+    }
+
+    // -----------------------------------------------------------------------
+    // render_filtered_diff tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn render_filtered_diff_contains_file_header() {
+        // setup
+        let file = DiffFile {
+            path: "src/lib.rs".into(),
+            old_path: None,
+            hunks: vec![DiffHunk {
+                header: "@@ -1,2 +1,3 @@".into(),
+                old_start: 1,
+                old_count: 2,
+                new_start: 1,
+                new_count: 3,
+                lines: vec![
+                    DiffLine::Context("fn existing() {}".into()),
+                    DiffLine::Added("fn new_fn() {}".into()),
+                    DiffLine::Removed("fn old_fn() {}".into()),
+                ],
+            }],
+            is_new: false,
+            is_deleted: false,
+        };
+        let analysis = HashMap::new();
+
+        // execute
+        let rendered = render_filtered_diff(&[file], &analysis);
+
+        // verify — file header and diff markers are present
+        assert!(rendered.contains("diff --git a/src/lib.rs b/src/lib.rs"));
+        assert!(rendered.contains("--- a/src/lib.rs"));
+        assert!(rendered.contains("+++ b/src/lib.rs"));
+        assert!(rendered.contains("+fn new_fn() {}"));
+        assert!(rendered.contains("-fn old_fn() {}"));
+    }
+
+    #[test]
+    fn render_filtered_diff_includes_summary_comment() {
+        // setup
+        let file = make_diff_file("src/auth.rs");
+        let mut analysis = HashMap::new();
+        analysis.insert(
+            "src/auth.rs".into(),
+            make_pass2(vec![ChangeType::Security], vec![AttentionTag::Security]),
+        );
+
+        // execute
+        let rendered = render_filtered_diff(&[file], &analysis);
+
+        // verify — summary comment line present
+        assert!(rendered.contains("# Summary: test"));
+        assert!(rendered.contains("# Tags: security"));
     }
 
     #[test]

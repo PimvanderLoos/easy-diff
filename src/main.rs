@@ -128,7 +128,22 @@ async fn main() -> Result<()> {
     //     - only if --analyze was passed in non-interactive mode
     let should_analyze = is_interactive || cli.analyze;
 
+    // 10. Estimate tokens — before analysis so we can warn the user early.
+    let estimated_tokens = diff::estimate_tokens(&diff.diff);
+    tracing::debug!(estimated_tokens, "token estimate for diff");
+
     if should_analyze {
+        // 11. Confirm for large PRs in interactive mode.
+        if is_interactive {
+            let confirmed =
+                tui::confirm_large_pr(estimated_tokens, config.preferences.large_pr_threshold)
+                    .context("large-PR confirmation failed")?;
+            if !confirmed {
+                println!("Aborted.");
+                return Ok(());
+            }
+        }
+
         let cache_path = repo_info.root.join(".easy-diff/cache/analysis.db");
         let cache = CacheStore::open(&cache_path)
             .with_context(|| format!("failed to open cache at {}", cache_path.display()))
@@ -157,34 +172,25 @@ async fn main() -> Result<()> {
             .context("analysis failed")?;
 
         if is_interactive {
-            // Display human-readable summary, then run filter selection
+            // Display human-readable summary, then run filter selection.
             tui::display_summary(&result.pass1);
 
             match tui::select_filters() {
                 Ok((change_types, attention_tags)) => {
-                    println!();
-                    println!("Selected change type filters:");
-                    if change_types.is_empty() {
-                        println!("  (none)");
-                    } else {
-                        for ct in &change_types {
-                            println!("  • {ct}");
-                        }
-                    }
-                    println!();
-                    println!("Selected attention tag filters:");
-                    if attention_tags.is_empty() {
-                        println!("  (none)");
-                    } else {
-                        for tag in &attention_tags {
-                            println!("  • {tag}");
-                        }
-                    }
-                    println!();
-                    println!("(Filtered diff output coming in PR-2)");
+                    // Parse, filter, render, and print to stdout.
+                    let parsed_files = diff::parse_diff(&diff.diff);
+                    let filtered = diff::filter_files(
+                        &parsed_files,
+                        &result.files,
+                        &change_types,
+                        &attention_tags,
+                    );
+                    let rendered = diff::render_filtered_diff(&filtered, &result.files);
+                    print!("{rendered}");
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "filter selection failed — skipping filters");
+                    tracing::warn!(error = %e, "filter selection failed — printing unfiltered diff");
+                    print!("{}", diff.diff);
                 }
             }
         } else {

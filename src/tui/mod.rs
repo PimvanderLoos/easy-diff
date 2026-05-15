@@ -15,7 +15,7 @@
 //! ```
 
 use anyhow::{bail, Result};
-use dialoguer::{MultiSelect, Select};
+use dialoguer::{Confirm, MultiSelect, Select};
 
 use crate::categories::{AttentionTag, ChangeType};
 use crate::llm::schema::Pass1Output;
@@ -127,6 +127,29 @@ pub fn select_filters() -> Result<(Vec<ChangeType>, Vec<AttentionTag>)> {
     Ok((selected_change_types, selected_attention_tags))
 }
 
+/// Shows the estimated token count and asks for confirmation when the diff is
+/// large (i.e. `estimated_tokens > threshold_lines`).
+///
+/// Returns `true` when the user confirms or when the PR is under the threshold
+/// (no prompt shown). Returns `false` when the user declines.
+///
+/// Returns an error when stdin is not a TTY or the prompt fails.
+pub fn confirm_large_pr(estimated_tokens: usize, threshold_lines: u32) -> Result<bool> {
+    if estimated_tokens <= threshold_lines as usize {
+        return Ok(true);
+    }
+
+    println!("\nThis PR has an estimated ~{estimated_tokens} tokens in its diff.");
+
+    let confirmed = Confirm::new()
+        .with_prompt("This is a large PR. Continue with analysis?")
+        .default(true)
+        .interact()
+        .map_err(|e| anyhow::anyhow!("confirmation prompt failed: {e}"))?;
+
+    Ok(confirmed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +208,20 @@ mod tests {
                 "variant {variant} missing from default selection"
             );
         }
+    }
+
+    #[test]
+    fn confirm_large_pr_returns_true_when_under_threshold() {
+        // setup
+        let estimated_tokens = 500;
+        let threshold = 1000_u32;
+
+        // execute — below threshold: should return Ok(true) without prompting
+        let result = confirm_large_pr(estimated_tokens, threshold);
+
+        // verify
+        assert!(result.is_ok());
+        assert!(result.unwrap(), "should return true when under threshold");
     }
 
     #[test]

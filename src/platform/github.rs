@@ -9,8 +9,6 @@
 //! // let diff = client.get_pull_request_diff("owner", "repo", 42).await?;
 //! ```
 
-#![allow(dead_code)]
-
 use serde::Deserialize;
 
 use crate::platform::{PlatformError, PullRequest, PullRequestDiff};

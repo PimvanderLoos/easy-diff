@@ -23,6 +23,13 @@ async fn main() -> Result<()> {
         .init();
 
     let _cli = Cli::parse();
-    tracing::info!("easy-diff starting");
+
+    let repo_root = git2::Repository::discover(".")
+        .ok()
+        .and_then(|r| r.workdir().map(|p| p.to_path_buf()));
+
+    let config = config::load_config(repo_root.as_deref())?;
+    tracing::info!(provider = ?config.llm.default_provider, "resolved LLM provider");
+
     Ok(())
 }

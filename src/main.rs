@@ -85,6 +85,7 @@ async fn main() -> Result<()> {
                     Arc::clone(&dispatcher),
                     config.preferences.large_pr_threshold,
                     5,
+                    config.preferences.max_file_context,
                 );
                 let result = engine.run(&diff.diff).await.context("analysis failed")?;
                 println!("{}", serde_json::to_string_pretty(&result)?);

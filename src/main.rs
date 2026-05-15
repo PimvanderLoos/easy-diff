@@ -13,7 +13,7 @@ mod tui;
 
 /// CLI args (empty for now, just --help/--version).
 #[derive(Parser)]
-#[command(name = "easy-diff", about = "LLM-powered PR review tool")]
+#[command(name = "easy-diff", about = "LLM-powered PR review tool", version)]
 struct Cli {}
 
 #[tokio::main]
@@ -25,12 +25,4 @@ async fn main() -> Result<()> {
     let _cli = Cli::parse();
     tracing::info!("easy-diff starting");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_harness_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }

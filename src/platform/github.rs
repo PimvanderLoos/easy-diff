@@ -63,6 +63,32 @@ impl GithubClient {
         Ok(github_prs.into_iter().map(PullRequest::from).collect())
     }
 
+    /// Fetches metadata for a specific pull request, including base and head SHAs.
+    ///
+    /// Returns a [`PullRequest`] populated with all fields including SHA values
+    /// required for cache key construction.
+    pub async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequest, PlatformError> {
+        let url = format!("{BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}");
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await?;
+
+        check_rate_limit(&response);
+        let response = check_status(response).await?;
+
+        let github_pr: GithubPullRequest = response.json().await?;
+        Ok(PullRequest::from(github_pr))
+    }
+
     /// Fetches the full unified diff for a specific pull request.
     ///
     /// The response body is the raw unified diff text, suitable for piping to
@@ -177,6 +203,8 @@ struct GithubUser {
 struct GithubRef {
     #[serde(rename = "ref")]
     ref_name: String,
+    /// Git SHA of this ref's tip.
+    sha: String,
 }
 
 impl From<GithubPullRequest> for PullRequest {
@@ -187,6 +215,8 @@ impl From<GithubPullRequest> for PullRequest {
             author: pr.user.login,
             source_branch: pr.head.ref_name,
             target_branch: pr.base.ref_name,
+            base_sha: pr.base.sha,
+            head_sha: pr.head.sha,
             created_at: pr.created_at,
             updated_at: pr.updated_at,
         }
@@ -202,8 +232,8 @@ mod tests {
             "number": 42,
             "title": "Fix authentication bug",
             "user": { "login": "octocat" },
-            "head": { "ref": "fix/auth-bug" },
-            "base": { "ref": "main" },
+            "head": { "ref": "fix/auth-bug", "sha": "abc1234" },
+            "base": { "ref": "main", "sha": "def5678" },
             "created_at": "2024-01-15T10:00:00Z",
             "updated_at": "2024-01-15T12:00:00Z",
             "labels": [],
@@ -215,8 +245,8 @@ mod tests {
         "number": 42,
         "title": "Fix authentication bug",
         "user": { "login": "octocat" },
-        "head": { "ref": "fix/auth-bug" },
-        "base": { "ref": "main" },
+        "head": { "ref": "fix/auth-bug", "sha": "abc1234" },
+        "base": { "ref": "main", "sha": "def5678" },
         "created_at": "2024-01-15T10:00:00Z",
         "updated_at": "2024-01-15T12:00:00Z"
     }"#;
@@ -225,8 +255,8 @@ mod tests {
         "number": 1,
         "title": "Test PR",
         "user": { "login": "user1" },
-        "head": { "ref": "feature/test" },
-        "base": { "ref": "main" },
+        "head": { "ref": "feature/test", "sha": "aaa0001" },
+        "base": { "ref": "main", "sha": "bbb0002" },
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-01T00:00:00Z",
         "labels": [{"name": "bug"}],
@@ -249,7 +279,9 @@ mod tests {
         assert_eq!(pr.title, "Fix authentication bug");
         assert_eq!(pr.user.login, "octocat");
         assert_eq!(pr.head.ref_name, "fix/auth-bug");
+        assert_eq!(pr.head.sha, "abc1234");
         assert_eq!(pr.base.ref_name, "main");
+        assert_eq!(pr.base.sha, "def5678");
         assert_eq!(pr.created_at, "2024-01-15T10:00:00Z");
         assert_eq!(pr.updated_at, "2024-01-15T12:00:00Z");
     }
@@ -268,6 +300,8 @@ mod tests {
         assert_eq!(pr.author, "octocat");
         assert_eq!(pr.source_branch, "fix/auth-bug");
         assert_eq!(pr.target_branch, "main");
+        assert_eq!(pr.head_sha, "abc1234");
+        assert_eq!(pr.base_sha, "def5678");
         assert_eq!(pr.created_at, "2024-01-15T10:00:00Z");
         assert_eq!(pr.updated_at, "2024-01-15T12:00:00Z");
     }
@@ -282,6 +316,7 @@ mod tests {
         assert_eq!(pr.number, 42);
         assert_eq!(pr.user.login, "octocat");
         assert_eq!(pr.head.ref_name, "fix/auth-bug");
+        assert_eq!(pr.head.sha, "abc1234");
     }
 
     #[test]

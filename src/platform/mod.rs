@@ -39,6 +39,10 @@ pub struct PullRequest {
     /// Target (base) branch name.
     #[allow(dead_code)]
     pub target_branch: String,
+    /// Git SHA of the base (target) branch tip at PR creation time.
+    pub base_sha: String,
+    /// Git SHA of the head (source) branch tip.
+    pub head_sha: String,
     /// ISO 8601 creation timestamp.
     #[allow(dead_code)]
     pub created_at: String,

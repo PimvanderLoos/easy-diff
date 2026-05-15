@@ -3,7 +3,7 @@
 ## Status: Active Development
 
 ## Current Epic: 2 — LLM Provider Abstraction
-## Current PR: Epic 2 PR-1 (Claude + Codex backends)
+## Current PR: Epic 2 PR-2 (Gemini backend with retry)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -62,6 +62,16 @@
   `validate_against_schema()` uses `jsonschema 0.46.5` (latest; plan anticipated 0.26).
   3 unit tests cover valid value, missing required field, and wrong type. 28 tests
   total pass. PR #7 on GitHub.
+
+- **Epic 2 PR-1**: `ClaudeProvider` and `CodexProvider` implemented in
+  `src/llm/claude.rs` and `src/llm/codex.rs`. Shared `run_subprocess` (spawns
+  CLI, pipes stdin/stdout, maps errors to `LlmError`) and `extract_json` (strips
+  markdown fences, finds first `{`/`[`, parses JSON) added to `src/llm/mod.rs`.
+  `AnyProvider` enum updated with `Claude`, `Codex`, `Gemini` variants;
+  `GeminiProvider` is a struct stub (fields + `new()` only, no `LlmProvider`
+  impl — added in PR-2). Clippy fix: `find(|c| c == '{' || c == '[')` →
+  `find(['{', '['])`. 5 `extract_json` unit tests + 2 provider name tests added
+  (32 total passing). PR #8 on GitHub.
 
 ## In Progress
 (none)
@@ -169,14 +179,21 @@
   message.
 
 ## Known Issues / Tech Debt (Epic 2)
-- **Epic 2 PR-0 — `AnyProvider` is uninhabited**: The empty enum cannot be constructed
-  until PR-1 adds its `Claude` and `Codex` variants. This is intentional and expected
-  to resolve naturally as the epic progresses.
 - **Epic 2 PR-0 — module docstring example is `no_run`**: The example in `src/llm/mod.rs`
   is not compiled by `cargo test`. Acceptable for now — the example references types
   (concrete providers) that don't exist yet.
+- **Epic 2 PR-1 — CLI flags unverified**: `claude --print --output-format json` and
+  `codex --quiet` flags are taken from the plan spec but not tested against real
+  installed binaries. Subprocess integration tests (requiring actual binaries) are
+  out of scope for CI; verify flags manually before relying on the output.
+- **Epic 2 PR-1 — `extract_json` byte-offset seek**: `find(['{', '['])` locates the
+  first brace by byte position, not JSON structural analysis. Pathological inputs
+  (e.g. prose containing `{` before the actual JSON object) could misparse. Acceptable
+  for MVP; harden with fixture tests once real CLI output is observed.
 
 ## Next Steps
-- Epic 2 PR-1: Claude + Codex CLI backends — `ClaudeProvider`, `CodexProvider`,
-  shared `run_subprocess` and `extract_json` helpers in `src/llm/mod.rs`,
-  update `AnyProvider` with `Claude` and `Codex` variants.
+- Epic 2 PR-2: Gemini CLI backend — replace `GeminiProvider` stub with full
+  implementation: `retry_loop`, `build_retry_prompt`, `LlmProvider for GeminiProvider`,
+  `LlmProvider for AnyProvider`. 6 unit tests covering retry success, invalid JSON
+  retry, schema violation retry, exhaustion, process error propagation, and prompt
+  construction.

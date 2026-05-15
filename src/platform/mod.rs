@@ -5,8 +5,6 @@
 //! [`PullRequest`] and [`PullRequestDiff`] are platform-agnostic types returned
 //! by all clients. [`PlatformError`] covers the full range of API failure modes.
 
-#![allow(dead_code)]
-
 pub mod bitbucket;
 pub mod github;
 
@@ -36,10 +34,13 @@ pub struct PullRequest {
     /// Author username.
     pub author: String,
     /// Source (head) branch name.
+    #[allow(dead_code)]
     pub source_branch: String,
     /// Target (base) branch name.
+    #[allow(dead_code)]
     pub target_branch: String,
     /// ISO 8601 creation timestamp.
+    #[allow(dead_code)]
     pub created_at: String,
     /// ISO 8601 last-updated timestamp.
     pub updated_at: String,
@@ -49,6 +50,7 @@ pub struct PullRequest {
 #[derive(Debug, Clone)]
 pub struct PullRequestDiff {
     /// PR number this diff belongs to.
+    #[allow(dead_code)]
     pub pr_number: u64,
     /// Full unified diff as a string.
     pub diff: String,

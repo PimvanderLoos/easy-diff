@@ -1,8 +1,6 @@
 //! Git repository operations via `libgit2` (`git2` crate): repo detection,
 //! remote URL parsing, and SHA resolution.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 use git2::Repository;
@@ -38,8 +36,10 @@ pub struct RepoInfo {
     /// Repository name (without `.git` suffix).
     pub repo: String,
     /// Name of the remote that was parsed (always `"origin"` for now).
+    #[allow(dead_code)]
     pub remote_name: String,
     /// Raw remote URL string as configured in git.
+    #[allow(dead_code)]
     pub remote_url: String,
 }
 

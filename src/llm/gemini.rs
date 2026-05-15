@@ -1,4 +1,6 @@
 //! Gemini CLI backend for the `LlmProvider` trait.
+// Not yet called from main.rs — wired in Epic 3.
+#![allow(dead_code)]
 //!
 //! Unlike Claude and Codex, the Gemini CLI does not guarantee structured JSON
 //! output. [`GeminiProvider`] validates the response against the caller-supplied

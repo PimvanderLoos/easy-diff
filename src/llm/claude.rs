@@ -1,4 +1,6 @@
 //! Claude Code CLI backend for the `LlmProvider` trait.
+// Not yet called from main.rs — wired in Epic 3.
+#![allow(dead_code)]
 
 use super::{extract_json, run_subprocess, LlmError, LlmProvider};
 

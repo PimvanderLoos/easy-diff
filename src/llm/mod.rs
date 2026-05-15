@@ -1,23 +1,23 @@
-//! LLM provider abstraction: `LlmProvider` trait and dispatch to Claude,
-//! Codex, and Gemini CLI backends.
+//! LLM provider abstraction: `LlmProvider` trait, provider dispatch, and
+//! the `LlmDispatcher` that selects between a default and optional fallback provider.
 //!
 //! The [`LlmProvider`] trait is implemented by each CLI backend. [`AnyProvider`]
 //! is an enum that delegates to the concrete provider chosen at startup, avoiding
-//! `Box<dyn LlmProvider>` and the `async-trait` crate.
+//! `Box<dyn LlmProvider>` and the `async-trait` crate. [`LlmDispatcher`] wraps
+//! default + optional fallback and retries on any [`LlmError`].
 //!
 //! [`validate_against_schema`] is a shared helper used by backends that need to
 //! verify LLM output conforms to a JSON Schema (notably the Gemini backend).
 //!
 //! # Example
 //! ```no_run
-//! use easy_diff::llm::{LlmProvider, validate_against_schema};
-//! use serde_json::json;
+//! use easy_diff::llm::{LlmProvider, create_dispatcher};
+//! use easy_diff::config::Config;
 //!
-//! let schema = json!({"type": "object", "properties": {"result": {"type": "string"}}, "required": ["result"]});
-//! // let provider = ...; // constructed from config in PR-3
-//! // let value = provider.analyze("prompt", &schema).await?;
+//! // let config: Config = ...;
+//! // let dispatcher = create_dispatcher(&config);
+//! // let value = dispatcher.analyze("prompt", &schema).await?;
 //! ```
-#![allow(dead_code)]
 
 pub mod claude;
 pub mod codex;
@@ -25,6 +25,7 @@ pub mod gemini;
 pub mod schema;
 
 /// Errors produced by LLM provider backends.
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
     #[error("LLM process failed to start: {message}")]
@@ -52,6 +53,7 @@ pub trait LlmProvider: Send + Sync {
 
     /// Sends `prompt` to the LLM and returns a [`serde_json::Value`] that
     /// conforms to `schema`.
+    #[allow(dead_code)]
     async fn analyze(
         &self,
         prompt: &str,
@@ -93,8 +95,74 @@ impl LlmProvider for AnyProvider {
     }
 }
 
+/// Selects and dispatches to the configured LLM provider.
+///
+/// Tries `default`; on any [`LlmError`] logs a warning and tries `fallback` if
+/// configured. If fallback also fails, returns the fallback error.
+pub struct LlmDispatcher {
+    default: AnyProvider,
+    #[allow(dead_code)]
+    fallback: Option<AnyProvider>,
+}
+
+impl LlmDispatcher {
+    /// Sends `prompt` to the default provider; falls back to the secondary on error.
+    #[allow(dead_code)]
+    pub async fn analyze(
+        &self,
+        prompt: &str,
+        schema: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        match self.default.analyze(prompt, schema).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                if let Some(fb) = &self.fallback {
+                    tracing::warn!(
+                        error = %e,
+                        fallback = fb.name(),
+                        "primary provider failed, trying fallback"
+                    );
+                    fb.analyze(prompt, schema).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Returns the name of the active (default) provider.
+    pub fn provider_name(&self) -> &str {
+        self.default.name()
+    }
+}
+
+/// Constructs an [`LlmDispatcher`] from resolved config.
+///
+/// Model overrides are deferred to Epic 3 when per-provider model fields are
+/// added to [`crate::config::LlmConfig`].
+pub fn create_dispatcher(config: &crate::config::Config) -> LlmDispatcher {
+    let default = provider_from_config(&config.llm.default_provider);
+    let fallback = config
+        .llm
+        .fallback_provider
+        .as_ref()
+        .map(provider_from_config);
+    LlmDispatcher { default, fallback }
+}
+
+fn provider_from_config(provider: &crate::config::Provider) -> AnyProvider {
+    match provider {
+        crate::config::Provider::Claude => AnyProvider::Claude(claude::ClaudeProvider::new(None)),
+        crate::config::Provider::Codex => AnyProvider::Codex(codex::CodexProvider::new(None)),
+        crate::config::Provider::Gemini => {
+            AnyProvider::Gemini(gemini::GeminiProvider::new(None, 3))
+        }
+    }
+}
+
 /// Spawns `program` with `args`, writes `input` to its stdin, and returns
 /// the stdout string. Maps process failures to [`LlmError`].
+#[allow(dead_code)]
 pub(crate) async fn run_subprocess(
     program: &str,
     args: &[&str],
@@ -134,6 +202,7 @@ pub(crate) async fn run_subprocess(
 
 /// Extracts the first JSON object or array from `text`, stripping markdown code
 /// fences if present. Returns [`LlmError::InvalidJson`] if none is found.
+#[allow(dead_code)]
 pub(crate) fn extract_json(text: &str) -> Result<serde_json::Value, LlmError> {
     let stripped = if let Some(inner) = text
         .trim()
@@ -157,6 +226,7 @@ pub(crate) fn extract_json(text: &str) -> Result<serde_json::Value, LlmError> {
 /// Returns the list of validation error messages, or an empty [`Vec`] if the
 /// value is valid. If the schema itself is invalid, returns a single-element
 /// Vec describing the schema error.
+#[allow(dead_code)]
 pub fn validate_against_schema(
     value: &serde_json::Value,
     schema: &serde_json::Value,
@@ -290,5 +360,20 @@ mod tests {
 
         // verify
         assert!(matches!(result, Err(LlmError::InvalidJson { .. })));
+    }
+
+    // --- dispatcher / provider factory ---
+
+    #[test]
+    fn provider_from_config_maps_all_variants() {
+        // setup + execute
+        let claude = provider_from_config(&crate::config::Provider::Claude);
+        let codex = provider_from_config(&crate::config::Provider::Codex);
+        let gemini = provider_from_config(&crate::config::Provider::Gemini);
+
+        // verify
+        assert_eq!(claude.name(), "claude");
+        assert_eq!(codex.name(), "codex");
+        assert_eq!(gemini.name(), "gemini");
     }
 }

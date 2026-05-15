@@ -39,9 +39,12 @@ async fn main() -> Result<()> {
 
     // 2. Load config (uses repo root for per-repo config)
     let config = config::load_config(Some(&repo_info.root))?;
-    tracing::info!(provider = ?config.llm.default_provider, "resolved LLM provider");
 
-    // 3. Check platform
+    // 3. Create LLM dispatcher
+    let dispatcher = llm::create_dispatcher(&config);
+    tracing::info!(provider = dispatcher.provider_name(), "LLM provider ready");
+
+    // 4. Check platform
     if repo_info.platform != Platform::GitHub {
         anyhow::bail!(
             "only GitHub repositories are currently supported (detected: {})",
@@ -49,7 +52,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    // 4. Get token
+    // 5. Get token
     let token = config.github.token.ok_or_else(|| {
         anyhow::anyhow!(
             "GitHub token not configured — add [github] token = \"...\" to {}",
@@ -59,7 +62,7 @@ async fn main() -> Result<()> {
         )
     })?;
 
-    // 5. Create client and dispatch
+    // 6. Create client and dispatch
     let client = GithubClient::new(token);
 
     match cli.pr {

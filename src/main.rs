@@ -22,13 +22,16 @@ use platform::{Platform, PullRequest};
 #[command(name = "easy-diff", about = "LLM-powered PR review tool", version)]
 struct Cli {
     /// Fetch and display the diff for a specific PR number.
+    ///
+    /// When omitted in an interactive terminal, a selection menu is shown.
     #[arg(long)]
     pr: Option<u64>,
 
     /// Run two-pass LLM analysis on the fetched diff and print results as JSON.
     ///
-    /// Requires `--pr`. Without this flag the raw diff is printed instead.
-    #[arg(long, requires = "pr")]
+    /// In non-interactive mode (i.e. `--pr N` given without a TTY), this flag
+    /// must be set explicitly. In interactive mode analysis runs automatically.
+    #[arg(long)]
     analyze: bool,
 
     /// Bypass the analysis cache and re-run the full LLM analysis.
@@ -77,57 +80,120 @@ async fn main() -> Result<()> {
         )
     })?;
 
-    // 6. Create client and dispatch
+    // 6. Create client
     let client = GithubClient::new(token);
 
-    match cli.pr {
-        Some(pr_number) => {
-            // Fetch PR metadata (needed for the cache key) alongside the diff.
-            let (pr_meta, diff) = tokio::try_join!(
-                client.get_pull_request(&repo_info.owner, &repo_info.repo, pr_number),
-                client.get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number),
-            )
-            .with_context(|| format!("failed to fetch PR #{pr_number}"))?;
+    // 7. Determine whether we are in interactive mode (TTY available)
+    let is_interactive = atty::is(atty::Stream::Stdin);
 
-            if cli.analyze {
-                let cache_path = repo_info.root.join(".easy-diff/cache/analysis.db");
-                let cache = CacheStore::open(&cache_path)
-                    .with_context(|| format!("failed to open cache at {}", cache_path.display()))
-                    .ok();
-                if cache.is_none() {
-                    tracing::warn!(path = %cache_path.display(), "could not open cache — analysis will proceed without caching");
+    // 8. Resolve PR number — either from `--pr`, or via interactive selection
+    let pr_number: u64 = if let Some(n) = cli.pr {
+        n
+    } else if is_interactive {
+        // Fetch PR list and let the user pick
+        let prs = client
+            .list_open_pull_requests(&repo_info.owner, &repo_info.repo)
+            .await
+            .context("failed to fetch open pull requests")?;
+
+        if prs.is_empty() {
+            println!(
+                "No open pull requests for {}/{}",
+                repo_info.owner, repo_info.repo
+            );
+            return Ok(());
+        }
+
+        let idx = tui::select_pr(&prs).context("PR selection failed")?;
+        prs[idx].number
+    } else {
+        // Non-interactive, no --pr: print list and exit (legacy behaviour)
+        let prs = client
+            .list_open_pull_requests(&repo_info.owner, &repo_info.repo)
+            .await
+            .context("failed to fetch open pull requests")?;
+        print_pr_list(&repo_info.owner, &repo_info.repo, &prs);
+        return Ok(());
+    };
+
+    // 9. Fetch PR metadata and diff in parallel
+    let (pr_meta, diff) = tokio::try_join!(
+        client.get_pull_request(&repo_info.owner, &repo_info.repo, pr_number),
+        client.get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number),
+    )
+    .with_context(|| format!("failed to fetch PR #{pr_number}"))?;
+
+    // 10. Decide whether to run analysis:
+    //     - always in interactive mode
+    //     - only if --analyze was passed in non-interactive mode
+    let should_analyze = is_interactive || cli.analyze;
+
+    if should_analyze {
+        let cache_path = repo_info.root.join(".easy-diff/cache/analysis.db");
+        let cache = CacheStore::open(&cache_path)
+            .with_context(|| format!("failed to open cache at {}", cache_path.display()))
+            .ok();
+        if cache.is_none() {
+            tracing::warn!(path = %cache_path.display(), "could not open cache — analysis will proceed without caching");
+        }
+
+        let pr_ctx = PrContext {
+            pr_number,
+            base_sha: pr_meta.base_sha.clone(),
+            head_sha: pr_meta.head_sha.clone(),
+        };
+
+        let engine = AnalysisEngine::new(
+            Arc::clone(&dispatcher),
+            config.preferences.large_pr_threshold,
+            5,
+            config.preferences.max_file_context,
+            cache,
+            cli.refresh,
+        );
+        let result = engine
+            .run(&diff.diff, &pr_ctx)
+            .await
+            .context("analysis failed")?;
+
+        if is_interactive {
+            // Display human-readable summary, then run filter selection
+            tui::display_summary(&result.pass1);
+
+            match tui::select_filters() {
+                Ok((change_types, attention_tags)) => {
+                    println!();
+                    println!("Selected change type filters:");
+                    if change_types.is_empty() {
+                        println!("  (none)");
+                    } else {
+                        for ct in &change_types {
+                            println!("  • {ct}");
+                        }
+                    }
+                    println!();
+                    println!("Selected attention tag filters:");
+                    if attention_tags.is_empty() {
+                        println!("  (none)");
+                    } else {
+                        for tag in &attention_tags {
+                            println!("  • {tag}");
+                        }
+                    }
+                    println!();
+                    println!("(Filtered diff output coming in PR-2)");
                 }
-
-                let pr_ctx = PrContext {
-                    pr_number,
-                    base_sha: pr_meta.base_sha.clone(),
-                    head_sha: pr_meta.head_sha.clone(),
-                };
-
-                let engine = AnalysisEngine::new(
-                    Arc::clone(&dispatcher),
-                    config.preferences.large_pr_threshold,
-                    5,
-                    config.preferences.max_file_context,
-                    cache,
-                    cli.refresh,
-                );
-                let result = engine
-                    .run(&diff.diff, &pr_ctx)
-                    .await
-                    .context("analysis failed")?;
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                print!("{}", diff.diff);
+                Err(e) => {
+                    tracing::warn!(error = %e, "filter selection failed — skipping filters");
+                }
             }
+        } else {
+            // Non-interactive: print JSON (original --analyze behaviour)
+            println!("{}", serde_json::to_string_pretty(&result)?);
         }
-        None => {
-            let prs = client
-                .list_open_pull_requests(&repo_info.owner, &repo_info.repo)
-                .await
-                .context("failed to fetch open pull requests")?;
-            print_pr_list(&repo_info.owner, &repo_info.repo, &prs);
-        }
+    } else {
+        // No analysis requested in non-interactive mode: print raw diff
+        print!("{}", diff.diff);
     }
 
     Ok(())

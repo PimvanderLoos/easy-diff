@@ -9,6 +9,9 @@
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
   dependencies in Cargo.toml, main.rs with tracing + clap, .gitignore.
   `cargo build`, `cargo clippy -- -D warnings`, and `cargo fmt --check` all pass.
+  4 CLI integration tests added in `tests/cli.rs` (--help, --version, bare
+  invocation, version string content). GitHub Actions CI workflow added at
+  `.github/workflows/ci.yml` (build → test → clippy → fmt on every push/PR).
 
 ## In Progress
 (none)
@@ -22,6 +25,13 @@
 - **Rust updated**: Cargo 1.82.0 could not handle edition2024 in `clap_lex`
   1.1.0 (a transitive dep of clap 4.6+). Resolved by running `rustup update
   stable` → Rust 1.95.0. No code change required.
+- **CI shipped in PR-0, not PR-2**: The roadmap planned CI as a separate PR-2.
+  It was added alongside PR-0 because the workflow is trivial and gives
+  immediate feedback on the open PR. PR-2 slot is now available for other
+  Epic 0 work (or can be skipped).
+- **Integration tests added beyond PR-0 spec**: PR-0 spec called for one
+  trivial `#[test]` in main.rs. Replaced with four proper CLI integration
+  tests in `tests/cli.rs` that exercise the built binary.
 
 ## Known Issues / Tech Debt
 (none)

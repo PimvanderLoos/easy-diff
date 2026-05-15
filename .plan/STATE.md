@@ -3,7 +3,7 @@
 ## Status: Active Development
 
 ## Current Epic: 0 — Project Scaffold
-## Current PR: PR-1 (config module)
+## Current PR: PR-2
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -12,6 +12,14 @@
   4 CLI integration tests added in `tests/cli.rs` (--help, --version, bare
   invocation, version string content). GitHub Actions CI workflow added at
   `.github/workflows/ci.yml` (build → test → clippy → fmt on every push/PR).
+- **PR-1**: Config module implemented in `src/config/mod.rs`. Public API:
+  `Config`, `GithubConfig`, `BitbucketConfig`, `LlmConfig`, `Preferences`,
+  `Provider` enum. Two-struct pattern: all-Option raw deserialization structs
+  merged into concrete public types. Three-layer merge: hardcoded defaults <
+  global (`~/.config/easy-diff/config.toml`) < per-repo
+  (`.easy-diff/config.toml`). `ConfigError` via `thiserror`. 7 unit tests.
+  `main.rs` wires up config loading and logs resolved provider at info level.
+  Added deps: `dirs = "5"`, dev-dep `tempfile = "3"`. PR #2 on GitHub.
 
 ## In Progress
 (none)
@@ -32,10 +40,18 @@
 - **Integration tests added beyond PR-0 spec**: PR-0 spec called for one
   trivial `#[test]` in main.rs. Replaced with four proper CLI integration
   tests in `tests/cli.rs` that exercise the built binary.
+- **`#![allow(dead_code)]` in config module**: In a binary crate, public
+  fields not yet read from `main` trigger dead_code errors under `-D warnings`.
+  Suppressed module-wide; fields are intentional public API for future epics.
+- **`ConfigError` uses `String` for path, not `PathBuf`**: `PathBuf` doesn't
+  impl `Display`, so thiserror can't interpolate it in `#[error(...)]`. Path
+  is converted via `path.display().to_string()` at error construction time.
+- **Per-repo token overrides not supported**: Open question in PR-1 spec.
+  Tokens (GitHub, Bitbucket) are global-only; `RawRepoConfig` exposes only
+  `llm` and `preferences` overrides.
 
 ## Known Issues / Tech Debt
 (none)
 
 ## Next Steps
-- PR-1: Config module — define global + per-repo TOML structs and loading logic.
-- PR-2: GitHub Actions CI (build, test, clippy, fmt on push/PR).
+- PR-2: (slot freed by CI shipping in PR-0) — available for next Epic 0 work or can be skipped.

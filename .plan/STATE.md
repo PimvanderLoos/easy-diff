@@ -3,7 +3,7 @@
 ## Status: Active Development
 
 ## Current Epic: 2 — LLM Provider Abstraction
-## Current PR: Epic 2 PR-2 (Gemini backend with retry)
+## Current PR: Epic 2 PR-3 (Schema types + dispatcher + config wiring)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -72,6 +72,15 @@
   impl — added in PR-2). Clippy fix: `find(|c| c == '{' || c == '[')` →
   `find(['{', '['])`. 5 `extract_json` unit tests + 2 provider name tests added
   (32 total passing). PR #8 on GitHub.
+
+- **Epic 2 PR-2**: Full `GeminiProvider` implementation in `src/llm/gemini.rs`.
+  `retry_loop<F, Fut>` generic retry loop extracted for unit-testability (parameterized
+  over fetch function; `Fn(String) -> Fut`). `build_retry_prompt` appends validation
+  errors (capped at `MAX_ERRORS_IN_RETRY = 5`) to avoid context window blowup.
+  `LlmProvider for AnyProvider` dispatch impl added to `src/llm/mod.rs`. Fix: `Fn`
+  closure requires double-clone of `Option<String>` model — outer clone into closure,
+  inner clone per invocation. 6 unit tests cover all retry scenarios + prompt
+  construction. 38 total tests pass. PR #9 on GitHub.
 
 ## In Progress
 (none)
@@ -190,10 +199,15 @@
   first brace by byte position, not JSON structural analysis. Pathological inputs
   (e.g. prose containing `{` before the actual JSON object) could misparse. Acceptable
   for MVP; harden with fixture tests once real CLI output is observed.
+- **Epic 2 PR-2 — Gemini CLI flags unverified**: `gemini [--model ...]` invocation
+  not tested against a real `gemini` binary. Same risk as Claude/Codex flags above.
+- **Epic 2 PR-2 — no backoff between retries**: Retry loop calls `fetch` immediately
+  without sleep. Acceptable for local CLI subprocesses (no rate limits), but worth
+  noting if Gemini CLI ever gains network-rate-limit behavior.
 
 ## Next Steps
-- Epic 2 PR-2: Gemini CLI backend — replace `GeminiProvider` stub with full
-  implementation: `retry_loop`, `build_retry_prompt`, `LlmProvider for GeminiProvider`,
-  `LlmProvider for AnyProvider`. 6 unit tests covering retry success, invalid JSON
-  retry, schema violation retry, exhaustion, process error propagation, and prompt
-  construction.
+- Epic 2 PR-3: Output schema types + dispatcher + config wiring — `Pass1Output`,
+  `Pass2Output`, `FileCluster` (with `JsonSchema` derives), `schema_for_pass1/2()`
+  helpers in `src/llm/schema/mod.rs`; `LlmDispatcher` with fallback in `src/llm/mod.rs`;
+  `create_dispatcher(config)` factory; wire dispatcher into `main.rs`; remove
+  `#![allow(dead_code)]`.

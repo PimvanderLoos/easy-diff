@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result};
 use clap::Parser;
+use std::sync::Arc;
 
 mod analysis;
 mod cache;
@@ -11,6 +12,7 @@ mod llm;
 mod platform;
 mod tui;
 
+use analysis::AnalysisEngine;
 use platform::github::GithubClient;
 use platform::{Platform, PullRequest};
 
@@ -21,6 +23,12 @@ struct Cli {
     /// Fetch and display the diff for a specific PR number.
     #[arg(long)]
     pr: Option<u64>,
+
+    /// Run two-pass LLM analysis on the fetched diff and print results as JSON.
+    ///
+    /// Requires `--pr`. Without this flag the raw diff is printed instead.
+    #[arg(long, requires = "pr")]
+    analyze: bool,
 }
 
 #[tokio::main]
@@ -41,7 +49,7 @@ async fn main() -> Result<()> {
     let config = config::load_config(Some(&repo_info.root))?;
 
     // 3. Create LLM dispatcher
-    let dispatcher = llm::create_dispatcher(&config);
+    let dispatcher = Arc::new(llm::create_dispatcher(&config));
     tracing::info!(provider = dispatcher.provider_name(), "LLM provider ready");
 
     // 4. Check platform
@@ -71,7 +79,18 @@ async fn main() -> Result<()> {
                 .get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number)
                 .await
                 .with_context(|| format!("failed to fetch diff for PR #{pr_number}"))?;
-            print!("{}", diff.diff);
+
+            if cli.analyze {
+                let engine = AnalysisEngine::new(
+                    Arc::clone(&dispatcher),
+                    config.preferences.large_pr_threshold,
+                    5,
+                );
+                let result = engine.run(&diff.diff).await.context("analysis failed")?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                print!("{}", diff.diff);
+            }
         }
         None => {
             let prs = client

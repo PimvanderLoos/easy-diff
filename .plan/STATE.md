@@ -80,7 +80,13 @@
   resolved as "take path for testability" — callers pass `"."`.
 
 ## Known Issues / Tech Debt
-(none)
+- **Epic 1 PR-0 — SCP detector is a heuristic**: `parse_remote_url` detects
+  SSH SCP-style URLs via `url.contains('@') && url.contains(':')`. A URL like
+  `user:pass@host/path` would be misrouted into the SCP branch. In practice
+  git remotes never take this form, so the risk is negligible.
+- **Epic 1 PR-0 — no test for SSH protocol without user prefix**: The code
+  handles `ssh://github.com/owner/repo` (no `user@`) via the `find('@')`
+  fallback, but there is no explicit test for this case.
 
 ## Next Steps
 - Epic 1 PR-1: GitHub REST API client (`src/platform/github.rs`,

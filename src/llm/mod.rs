@@ -62,8 +62,73 @@ pub trait LlmProvider: Send + Sync {
 /// Concrete provider selected from config at startup.
 ///
 /// Delegates to the appropriate CLI backend without dynamic dispatch.
-/// PR-1 adds `Claude` and `Codex` variants; PR-2 completes `Gemini`.
-pub enum AnyProvider {}
+pub enum AnyProvider {
+    /// Claude Code CLI backend.
+    Claude(claude::ClaudeProvider),
+    /// Codex CLI backend.
+    Codex(codex::CodexProvider),
+    /// Gemini CLI backend (retry logic added in PR-2).
+    Gemini(gemini::GeminiProvider),
+}
+
+/// Spawns `program` with `args`, writes `input` to its stdin, and returns
+/// the stdout string. Maps process failures to [`LlmError`].
+pub(crate) async fn run_subprocess(
+    program: &str,
+    args: &[&str],
+    input: &str,
+) -> Result<String, LlmError> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| LlmError::ProcessStart {
+            message: e.to_string(),
+        })?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).await?;
+    }
+
+    let output = child.wait_with_output().await?;
+
+    if !output.status.success() {
+        let code = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(LlmError::ProcessFailed { code, stderr });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    if stdout.trim().is_empty() {
+        return Err(LlmError::EmptyOutput);
+    }
+
+    Ok(stdout)
+}
+
+/// Extracts the first JSON object or array from `text`, stripping markdown code
+/// fences if present. Returns [`LlmError::InvalidJson`] if none is found.
+pub(crate) fn extract_json(text: &str) -> Result<serde_json::Value, LlmError> {
+    let stripped = if let Some(inner) = text
+        .trim()
+        .strip_prefix("```json")
+        .or_else(|| text.trim().strip_prefix("```"))
+    {
+        inner.trim_end_matches("```").trim()
+    } else {
+        text.trim()
+    };
+
+    let start = stripped.find(['{', '[']).unwrap_or(0);
+
+    serde_json::from_str(&stripped[start..]).map_err(|e| LlmError::InvalidJson {
+        message: e.to_string(),
+    })
+}
 
 /// Validates `value` against `schema`.
 ///
@@ -141,5 +206,67 @@ mod tests {
             !errors.is_empty(),
             "expected validation errors for wrong type"
         );
+    }
+
+    // --- extract_json ---
+
+    #[test]
+    fn extract_json_bare_object() {
+        // setup
+        let input = r#"{"key":"val"}"#;
+
+        // execute
+        let result = extract_json(input);
+
+        // verify
+        assert_eq!(result.unwrap(), json!({"key": "val"}));
+    }
+
+    #[test]
+    fn extract_json_fenced_json() {
+        // setup
+        let input = "```json\n{\"k\":1}\n```";
+
+        // execute
+        let result = extract_json(input);
+
+        // verify
+        assert_eq!(result.unwrap(), json!({"k": 1}));
+    }
+
+    #[test]
+    fn extract_json_fenced_no_lang() {
+        // setup
+        let input = "```\n{\"k\":1}\n```";
+
+        // execute
+        let result = extract_json(input);
+
+        // verify
+        assert_eq!(result.unwrap(), json!({"k": 1}));
+    }
+
+    #[test]
+    fn extract_json_with_preamble() {
+        // setup
+        let input = r#"Here is the output: {"k":1}"#;
+
+        // execute
+        let result = extract_json(input);
+
+        // verify
+        assert_eq!(result.unwrap(), json!({"k": 1}));
+    }
+
+    #[test]
+    fn extract_json_invalid() {
+        // setup
+        let input = "not json at all";
+
+        // execute
+        let result = extract_json(input);
+
+        // verify
+        assert!(matches!(result, Err(LlmError::InvalidJson { .. })));
     }
 }

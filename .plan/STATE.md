@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 3 — Two-Pass Analysis Engine
-## Current PR: Epic 3 PR-0 (first PR of Epic 3)
+## Current Epic: 4 — Caching Layer
+## Current PR: Epic 4 PR-0 (first PR of Epic 4)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -92,6 +92,27 @@
   level. Module-wide `#![allow(dead_code)]` removed from `src/llm/mod.rs`; replaced
   with targeted item-level suppressions across the llm module tree. 44 total tests
   pass. PR #10 on GitHub.
+
+- **Epic 3 PR-0**: `ChangeType` (10 variants) and `AttentionTag` (7 variants) enums
+  implemented in `src/categories/mod.rs`. Both derive `Serialize, Deserialize, JsonSchema,
+  Clone, Copy, Debug, PartialEq, Eq, Hash` with `#[serde(rename_all = "kebab-case")]`.
+  `Display` impls, `all()` methods. `Pass1Output` and `Pass2Output` updated from
+  `Vec<String>` to typed enums. 56 tests pass. PR #11 on GitHub.
+
+- **Epic 3 PR-1**: Prompt construction for Pass 1 and Pass 2. `build_pass1_prompt` with
+  normal and large-PR modes. `build_pass2_prompt` with Pass 1 context injection and cluster
+  membership. `description()` methods added to both category enums for prompt embedding.
+  `build_category_definitions` shared helper. 10 new tests. 62 total pass. PR #12 on GitHub.
+
+- **Epic 3 PR-2**: Two-pass analysis orchestration. `AnalysisEngine` with `run()` method
+  orchestrating Pass 1 → parallel Pass 2 via `tokio::JoinSet` + `Semaphore` (concurrency=5).
+  `AnalysisResult` struct. `split_diff_by_file` helper. `--analyze` CLI flag. Engine uses
+  `Arc<LlmDispatcher>`. Failed files warned, not aborted. 66 total tests pass. PR #13.
+
+- **Epic 3 PR-3**: Hunk splitting for oversized files. `split_into_chunks` splits at `@@`
+  boundaries with file header preservation. `merge_pass2_outputs` deduplicates categories,
+  concatenates summaries/details. `AnalysisEngine` auto-splits files exceeding
+  `max_file_context` lines. 73 total tests pass. PR #14 on GitHub.
 
 ## In Progress
 (none)
@@ -230,7 +251,7 @@
   noting if Gemini CLI ever gains network-rate-limit behavior.
 
 ## Next Steps
-- Epic 3 PR-0: Two-pass analysis engine — prompt construction for Pass 1 and Pass 2,
-  Pass 2 parallel execution via `tokio::spawn`, category/tag types in `src/categories/`,
-  large-PR handling, hunk splitting for oversized files. See `.plan/3-analysis-engine/`
-  (plan files not yet written).
+- Epic 4 PR-0: SQLite cache store — `CacheStore` wrapping rusqlite, `CacheKey`,
+  store/retrieve Pass 1 and Pass 2 results, schema version invalidation.
+- Epic 4 PR-1: Cache integration with analysis engine and `--refresh` CLI flag.
+- Epic 5: CLI MVP — diff parser, TUI PR/filter selection, filtered diff output.

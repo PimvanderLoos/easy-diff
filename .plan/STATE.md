@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 1 — Git & Diff Layer
-## Current PR: (none — starting Epic 1)
+## Current Epic: 1 — Git & Platform Integration
+## Current PR: (none — starting Epic 1 PR-1)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -25,6 +25,13 @@
   Removed push branch filter (now triggers on every branch). Job renamed to
   `check` / "Build & Check" per spec. `RUST_BACKTRACE` env var removed (not in
   spec). `cargo audit` deferred per spec guidance. PR #3 on GitHub.
+- **Epic 1 PR-0**: Git repository detection implemented in `src/git/mod.rs`.
+  `Platform` enum (GitHub/BitBucket) with `Display` impl added to
+  `src/platform/mod.rs`. `RepoInfo` struct, `GitError` enum (6 variants),
+  `detect_repo_info()`, and `parse_remote_url()` implemented. Handles HTTPS,
+  SSH SCP-style, and SSH protocol URL formats. 11 unit tests: all URL
+  format/error cases covered plus a tempdir integration test. `#![allow(dead_code)]`
+  added (removed in Epic 1 PR-2 when wired into main.rs). PR #4 on GitHub.
 
 ## In Progress
 (none)
@@ -63,9 +70,24 @@
   benefit at the current project size.
 - **`Swatinem/rust-cache` not pinned**: Using `@v2` tracking latest v2.x as
   the spec recommended.
+- **Epic 1 PR-0 — `origin` hardcoded**: Open question resolved as "hardcode
+  origin" — overwhelmingly common case; a `remote_name` config field can be
+  added later if needed.
+- **Epic 1 PR-0 — `Platform` errors on unknown hosts**: Open question resolved
+  as "error, not `Unknown(String)` variant" — an unknown platform is
+  unsupported; clear error beats silent no-op, new platforms are added to enum.
+- **Epic 1 PR-0 — `detect_repo_info` takes a path parameter**: Open question
+  resolved as "take path for testability" — callers pass `"."`.
 
 ## Known Issues / Tech Debt
-(none)
+- **Epic 1 PR-0 — SCP detector is a heuristic**: `parse_remote_url` detects
+  SSH SCP-style URLs via `url.contains('@') && url.contains(':')`. A URL like
+  `user:pass@host/path` would be misrouted into the SCP branch. In practice
+  git remotes never take this form, so the risk is negligible.
+- **Epic 1 PR-0 — no test for SSH protocol without user prefix**: The code
+  handles `ssh://github.com/owner/repo` (no `user@`) via the `find('@')`
+  fallback, but there is no explicit test for this case.
 
 ## Next Steps
-- Epic 1: Git & Diff Layer — start with PR-1 of Epic 1 (git module).
+- Epic 1 PR-1: GitHub REST API client (`src/platform/github.rs`,
+  `src/platform/mod.rs` — add `PullRequest`, `PullRequestDiff`, `PlatformError`)

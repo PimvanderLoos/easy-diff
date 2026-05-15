@@ -1,73 +1,126 @@
-# Prerequisites
+# Native/C/C++/CMake artifacts
 *.d
-
-# Compiled Object files
 *.slo
 *.lo
 *.o
 *.obj
-
-# Precompiled Headers
 *.gch
 *.pch
-
-# Linker files
 *.ilk
-
-# Debugger Files
 *.pdb
-
-# Compiled Dynamic libraries
 *.so
 *.dylib
 *.dll
 *.so.*
-
-
-# Fortran module files
 *.mod
 *.smod
-
-# Compiled Static libraries
 *.lai
 *.la
 *.a
 *.lib
-
-# Executables
 *.exe
 *.out
 *.app
+*.dwo
 
 # Build directories
 build/
 Build/
 build-*/
+target/
+src-tauri/target/
 
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
-Makefile
 install_manifest.txt
 compile_commands.json
 
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
+# Caution: only ignore Makefile if it is generated in this repo.
+# Makefile
 
 # vcpkg
 vcpkg_installed/
 
-# debug information files
-*.dwo
+# Rust / Tauri
+src-tauri/WixTools/
+.tauri/
+src-tauri/.tauri/
+rustc-ice-*.txt
 
-# test output & cache
+# JavaScript / TypeScript dependencies
+node_modules/
+.pnpm-store/
+
+# Frontend build output
+dist/
+.svelte-kit/
+package/
+
+# Vite / TypeScript caches
+.vite/
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+*.tsbuildinfo
+
+# Test / coverage output
 Testing/
 .cache/
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
 
-# Rust
-/target
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
 
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.template
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# VSCode: ignore local state, allow shared config
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains / IntelliJ / WebStorm / RustRover
+.idea/
+*.iml
+
+# Other editors
+*.sublime-*
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+
+# Android / mobile signing secrets
+*.jks
+*.keystore
+keystore.properties
+src-tauri/gen/android/keystore.properties
+
+# Apple signing / provisioning secrets
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile

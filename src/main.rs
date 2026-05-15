@@ -12,7 +12,8 @@ mod llm;
 mod platform;
 mod tui;
 
-use analysis::AnalysisEngine;
+use analysis::{AnalysisEngine, PrContext};
+use cache::CacheStore;
 use platform::github::GithubClient;
 use platform::{Platform, PullRequest};
 
@@ -29,6 +30,12 @@ struct Cli {
     /// Requires `--pr`. Without this flag the raw diff is printed instead.
     #[arg(long, requires = "pr")]
     analyze: bool,
+
+    /// Bypass the analysis cache and re-run the full LLM analysis.
+    ///
+    /// New results are still written to the cache. Requires `--analyze`.
+    #[arg(long, requires = "analyze")]
+    refresh: bool,
 }
 
 #[tokio::main]
@@ -75,19 +82,40 @@ async fn main() -> Result<()> {
 
     match cli.pr {
         Some(pr_number) => {
-            let diff = client
-                .get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number)
-                .await
-                .with_context(|| format!("failed to fetch diff for PR #{pr_number}"))?;
+            // Fetch PR metadata (needed for the cache key) alongside the diff.
+            let (pr_meta, diff) = tokio::try_join!(
+                client.get_pull_request(&repo_info.owner, &repo_info.repo, pr_number),
+                client.get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number),
+            )
+            .with_context(|| format!("failed to fetch PR #{pr_number}"))?;
 
             if cli.analyze {
+                let cache_path = repo_info.root.join(".easy-diff/cache/analysis.db");
+                let cache = CacheStore::open(&cache_path)
+                    .with_context(|| format!("failed to open cache at {}", cache_path.display()))
+                    .ok();
+                if cache.is_none() {
+                    tracing::warn!(path = %cache_path.display(), "could not open cache — analysis will proceed without caching");
+                }
+
+                let pr_ctx = PrContext {
+                    pr_number,
+                    base_sha: pr_meta.base_sha.clone(),
+                    head_sha: pr_meta.head_sha.clone(),
+                };
+
                 let engine = AnalysisEngine::new(
                     Arc::clone(&dispatcher),
                     config.preferences.large_pr_threshold,
                     5,
                     config.preferences.max_file_context,
+                    cache,
+                    cli.refresh,
                 );
-                let result = engine.run(&diff.diff).await.context("analysis failed")?;
+                let result = engine
+                    .run(&diff.diff, &pr_ctx)
+                    .await
+                    .context("analysis failed")?;
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
                 print!("{}", diff.diff);

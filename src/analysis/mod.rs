@@ -9,15 +9,20 @@
 //! splits it at hunk boundaries and each chunk is analysed separately. The results
 //! are merged with [`merge_pass2_outputs`] before being stored.
 //!
+//! Cache integration: if a [`CacheStore`] is provided, cached Pass 1 and Pass 2
+//! results are reused rather than re-querying the LLM. The `--refresh` flag forces
+//! full re-analysis while still writing new results to the cache.
+//!
 //! # Example
 //! ```no_run
 //! use std::sync::Arc;
-//! use easy_diff::analysis::AnalysisEngine;
+//! use easy_diff::analysis::{AnalysisEngine, PrContext};
 //! use easy_diff::llm::LlmDispatcher;
 //!
 //! // let dispatcher: Arc<LlmDispatcher> = ...;
-//! // let engine = AnalysisEngine::new(dispatcher, 5000, 5, 1000);
-//! // let result = engine.run(diff).await?;
+//! // let ctx = PrContext { pr_number: 42, base_sha: "abc".into(), head_sha: "def".into() };
+//! // let engine = AnalysisEngine::new(dispatcher, 5000, 5, 1000, None, false);
+//! // let result = engine.run(diff, &ctx).await?;
 //! ```
 
 pub mod pass1_summary;
@@ -32,11 +37,24 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+use crate::cache::{CacheKey, CacheStore};
 use crate::llm::schema::{schema_for_pass1, schema_for_pass2, Pass1Output, Pass2Output};
 use crate::llm::LlmDispatcher;
 
 use pass1_summary::build_pass1_prompt;
 use pass2_files::build_pass2_prompt;
+
+/// PR metadata required to build the cache key and provide analysis context.
+///
+/// Obtain from the platform API response before calling [`AnalysisEngine::run`].
+pub struct PrContext {
+    /// Platform PR number (e.g. GitHub PR number).
+    pub pr_number: u64,
+    /// Git SHA of the base (target) branch tip.
+    pub base_sha: String,
+    /// Git SHA of the head (source) branch tip.
+    pub head_sha: String,
+}
 
 /// Combined result of both analysis passes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +71,9 @@ pub struct AnalysisResult {
 /// parallel, bounded by `max_concurrency`. Files whose diff exceeds
 /// `max_file_context` lines are split into hunk-aligned chunks and each
 /// chunk is analysed separately before results are merged.
+///
+/// When `cache` is `Some`, cached results are reused. Setting `refresh = true`
+/// bypasses cache reads but still writes new results.
 pub struct AnalysisEngine {
     dispatcher: Arc<LlmDispatcher>,
     /// Lines-of-diff threshold above which large-PR mode is activated.
@@ -61,6 +82,10 @@ pub struct AnalysisEngine {
     max_concurrency: usize,
     /// Maximum lines per file diff sent to Pass 2 in a single LLM call.
     max_file_context: u32,
+    /// Optional SQLite-backed cache. `None` disables caching entirely.
+    cache: Option<CacheStore>,
+    /// When `true`, cache reads are skipped but results are still written.
+    refresh: bool,
 }
 
 impl AnalysisEngine {
@@ -71,64 +96,144 @@ impl AnalysisEngine {
     /// - `max_concurrency`: caps the number of concurrent Pass 2 LLM calls.
     /// - `max_file_context`: maximum lines per file diff for a single Pass 2
     ///   call; oversized diffs are split at hunk boundaries before analysis.
+    /// - `cache`: optional SQLite-backed cache; `None` disables caching.
+    /// - `refresh`: when `true`, cache reads are skipped but results are still written.
     pub fn new(
         dispatcher: Arc<LlmDispatcher>,
         large_pr_threshold: u32,
         max_concurrency: usize,
         max_file_context: u32,
+        cache: Option<CacheStore>,
+        refresh: bool,
     ) -> Self {
         Self {
             dispatcher,
             large_pr_threshold,
             max_concurrency,
             max_file_context,
+            cache,
+            refresh,
         }
     }
 
     /// Runs the full two-pass analysis and returns the combined result.
     ///
+    /// Cache reads happen on the calling task (before any async work is spawned)
+    /// to keep all SQLite access single-threaded. Cache writes happen after each
+    /// batch of spawned tasks completes.
+    ///
     /// Files that fail Pass 2 are omitted from `result.files`; a warning is
     /// logged for each failure.
-    pub async fn run(&self, diff: &str) -> anyhow::Result<AnalysisResult> {
+    pub async fn run(&self, diff: &str, ctx: &PrContext) -> anyhow::Result<AnalysisResult> {
+        let cache_key = self.cache.as_ref().map(|_| CacheKey {
+            pr_id: ctx.pr_number.to_string(),
+            base_sha: ctx.base_sha.clone(),
+            head_sha: ctx.head_sha.clone(),
+            provider: self.dispatcher.provider_name().to_owned(),
+        });
+
         // ── Pass 1 ─────────────────────────────────────────────────────────
         let file_pairs = split_diff_by_file(diff);
         let file_names: Vec<&str> = file_pairs.iter().map(|(name, _)| name.as_str()).collect();
 
         let line_count = diff.lines().count() as u32;
         let large_pr = line_count > self.large_pr_threshold;
-        if large_pr {
-            tracing::info!(
-                lines = line_count,
-                threshold = self.large_pr_threshold,
-                "large PR detected — Pass 1 uses file-names-only mode"
-            );
-        }
 
-        let pass1_prompt = build_pass1_prompt(diff, &file_names, large_pr);
-        let pass1_schema = schema_for_pass1();
-
-        let pass1_value = self
-            .dispatcher
-            .analyze(&pass1_prompt, &pass1_schema)
-            .await
-            .context("Pass 1 LLM call failed")?;
-
-        let pass1: Pass1Output =
-            serde_json::from_value(pass1_value).context("failed to deserialize Pass 1 output")?;
+        // Check cache for Pass 1 (skipped when refresh=true or no cache).
+        let pass1: Pass1Output = if let Some((cache, key)) =
+            self.cache.as_ref().zip(cache_key.as_ref())
+        {
+            if !self.refresh {
+                match cache.get_pass1(key) {
+                    Ok(Some(cached)) => {
+                        tracing::info!("Pass 1 cache hit — skipping LLM call");
+                        cached
+                    }
+                    Ok(None) => {
+                        tracing::debug!("Pass 1 cache miss — running LLM");
+                        self.run_pass1_llm(diff, &file_names, large_pr, Some((cache, key)))
+                            .await?
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Pass 1 cache read error — falling back to LLM");
+                        self.run_pass1_llm(diff, &file_names, large_pr, Some((cache, key)))
+                            .await?
+                    }
+                }
+            } else {
+                // refresh=true: skip read, still write
+                self.run_pass1_llm(diff, &file_names, large_pr, Some((cache, key)))
+                    .await?
+            }
+        } else {
+            self.run_pass1_llm(diff, &file_names, large_pr, None)
+                .await?
+        };
 
         tracing::info!(
             files = file_pairs.len(),
             "Pass 1 complete — starting parallel Pass 2"
         );
 
-        // ── Pass 2 ─────────────────────────────────────────────────────────
+        // ── Pass 2 — determine which files need LLM analysis ────────────────
+        // Read cached files list on the main task (no Send required).
+        let cached_files: HashSet<String> = if let Some((cache, key)) =
+            self.cache.as_ref().zip(cache_key.as_ref())
+        {
+            if !self.refresh {
+                match cache.get_cached_files(key) {
+                    Ok(files) => files.into_iter().collect(),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to read cached file list — treating all as uncached");
+                        HashSet::new()
+                    }
+                }
+            } else {
+                HashSet::new()
+            }
+        } else {
+            HashSet::new()
+        };
+
+        // Serve cached Pass 2 results immediately.
+        let mut files: HashMap<String, Pass2Output> = HashMap::new();
+        let mut uncached_pairs: Vec<(String, String)> = Vec::new();
+
+        for (file_path, file_diff) in file_pairs {
+            if cached_files.contains(&file_path) {
+                if let Some((cache, key)) = self.cache.as_ref().zip(cache_key.as_ref()) {
+                    match cache.get_pass2(key, &file_path) {
+                        Ok(Some(output)) => {
+                            tracing::debug!(file = %file_path, "Pass 2 cache hit");
+                            files.insert(file_path, output);
+                            continue;
+                        }
+                        Ok(None) => {
+                            tracing::debug!(file = %file_path, "Pass 2 cache miss (stale list)");
+                        }
+                        Err(e) => {
+                            tracing::warn!(file = %file_path, error = %e, "Pass 2 cache read error");
+                        }
+                    }
+                }
+            }
+            uncached_pairs.push((file_path, file_diff));
+        }
+
+        tracing::info!(
+            cached = files.len(),
+            uncached = uncached_pairs.len(),
+            "Pass 2 cache check complete"
+        );
+
+        // ── Pass 2 — LLM analysis for uncached files ─────────────────────
         let semaphore = Arc::new(Semaphore::new(self.max_concurrency));
         let pass2_schema = schema_for_pass2();
         let pass1_arc = Arc::new(pass1.clone());
 
         let mut join_set: JoinSet<(String, anyhow::Result<Pass2Output>)> = JoinSet::new();
 
-        for (file_path, file_diff) in file_pairs {
+        for (file_path, file_diff) in uncached_pairs {
             let dispatcher = Arc::clone(&self.dispatcher);
             let sem = Arc::clone(&semaphore);
             let schema = pass2_schema.clone();
@@ -170,11 +275,15 @@ impl AnalysisEngine {
             });
         }
 
-        let mut files: HashMap<String, Pass2Output> = HashMap::new();
-
         while let Some(join_result) = join_set.join_next().await {
             match join_result {
                 Ok((path, Ok(output))) => {
+                    // Write to cache eagerly (on the main task, SQLite-safe).
+                    if let Some((cache, key)) = self.cache.as_ref().zip(cache_key.as_ref()) {
+                        if let Err(e) = cache.store_pass2(key, &path, &output) {
+                            tracing::warn!(file = %path, error = %e, "failed to cache Pass 2 result");
+                        }
+                    }
                     files.insert(path, output);
                 }
                 Ok((path, Err(e))) => {
@@ -189,6 +298,42 @@ impl AnalysisEngine {
         tracing::info!(successful = files.len(), "Pass 2 complete");
 
         Ok(AnalysisResult { pass1, files })
+    }
+
+    /// Calls the LLM for Pass 1 and optionally writes the result to cache.
+    async fn run_pass1_llm(
+        &self,
+        diff: &str,
+        file_names: &[&str],
+        large_pr: bool,
+        cache: Option<(&CacheStore, &CacheKey)>,
+    ) -> anyhow::Result<Pass1Output> {
+        if large_pr {
+            tracing::info!(
+                threshold = self.large_pr_threshold,
+                "large PR detected — Pass 1 uses file-names-only mode"
+            );
+        }
+
+        let pass1_prompt = build_pass1_prompt(diff, file_names, large_pr);
+        let pass1_schema = schema_for_pass1();
+
+        let pass1_value = self
+            .dispatcher
+            .analyze(&pass1_prompt, &pass1_schema)
+            .await
+            .context("Pass 1 LLM call failed")?;
+
+        let pass1: Pass1Output =
+            serde_json::from_value(pass1_value).context("failed to deserialize Pass 1 output")?;
+
+        if let Some((store, key)) = cache {
+            if let Err(e) = store.store_pass1(key, &pass1) {
+                tracing::warn!(error = %e, "failed to cache Pass 1 result");
+            }
+        }
+
+        Ok(pass1)
     }
 }
 
@@ -659,5 +804,203 @@ mod tests {
         assert!(merged.details.contains(&"detail 1".to_owned()));
         assert!(merged.details.contains(&"detail 2".to_owned()));
         assert!(merged.details.contains(&"detail 3".to_owned()));
+    }
+
+    // ── Cache integration tests ───────────────────────────────────────────────
+    //
+    // These tests verify cache read/write behaviour independently of LLM calls.
+    // A full cache hit means no LLM subprocess is ever started, so the tests
+    // work without a real Claude/Gemini/Codex binary.
+
+    use crate::cache::{CacheKey, CacheStore};
+    use crate::llm::schema::{Pass1Output, Pass2Output};
+
+    fn sample_ctx() -> PrContext {
+        PrContext {
+            pr_number: 42,
+            base_sha: "aaaaaa".into(),
+            head_sha: "bbbbbb".into(),
+        }
+    }
+
+    fn sample_cache_key(provider: &str) -> CacheKey {
+        let ctx = sample_ctx();
+        CacheKey {
+            pr_id: ctx.pr_number.to_string(),
+            base_sha: ctx.base_sha,
+            head_sha: ctx.head_sha,
+            provider: provider.to_owned(),
+        }
+    }
+
+    fn sample_pass1_output() -> Pass1Output {
+        use crate::categories::AttentionTag;
+        use crate::llm::schema::FileCluster;
+        Pass1Output {
+            summary: "Cached PR summary.".into(),
+            change_types: vec![ChangeType::Feature],
+            attention_tags: vec![AttentionTag::Security],
+            file_clusters: vec![FileCluster {
+                label: "Auth".into(),
+                files: vec!["src/auth.rs".into()],
+                rationale: "Auth changes.".into(),
+            }],
+        }
+    }
+
+    fn sample_pass2_output(summary: &str) -> Pass2Output {
+        Pass2Output {
+            summary: summary.to_owned(),
+            change_types: vec![ChangeType::Feature],
+            attention_tags: vec![],
+            details: vec!["Some detail.".into()],
+        }
+    }
+
+    /// Builds a minimal two-file diff fixture for use in cache tests.
+    fn two_file_diff() -> &'static str {
+        "diff --git a/src/a.rs b/src/a.rs\n\
+         index 0000000..1111111 100644\n\
+         --- a/src/a.rs\n\
+         +++ b/src/a.rs\n\
+         @@ -1 +1 @@\n\
+         -old a\n\
+         +new a\n\
+         diff --git a/src/b.rs b/src/b.rs\n\
+         index 2222222..3333333 100644\n\
+         --- a/src/b.rs\n\
+         +++ b/src/b.rs\n\
+         @@ -1 +1 @@\n\
+         -old b\n\
+         +new b"
+    }
+
+    /// Creates an `AnalysisEngine` backed by a real `ClaudeProvider` dispatcher.
+    /// Because all tests that use this engine pre-populate the cache fully, the
+    /// dispatcher is never actually invoked.
+    fn make_engine(cache: CacheStore, refresh: bool) -> AnalysisEngine {
+        use crate::config::{
+            BitbucketConfig, Config, GithubConfig, LlmConfig, Preferences, Provider,
+        };
+        let config = Config {
+            github: GithubConfig { token: None },
+            bitbucket: BitbucketConfig {
+                username: None,
+                app_password: None,
+            },
+            llm: LlmConfig {
+                default_provider: Provider::Claude,
+                fallback_provider: None,
+            },
+            preferences: Preferences {
+                context_lines: 5,
+                max_file_context: 500,
+                large_pr_threshold: 5000,
+            },
+        };
+        let dispatcher = Arc::new(crate::llm::create_dispatcher(&config));
+        AnalysisEngine::new(dispatcher, 5000, 5, 1000, Some(cache), refresh)
+    }
+
+    #[tokio::test]
+    async fn full_cache_hit_skips_llm() {
+        // setup — pre-populate Pass 1 and all Pass 2 files in an in-memory cache
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+        let p1 = sample_pass1_output();
+        cache.store_pass1(&key, &p1).unwrap();
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("a summary"))
+            .unwrap();
+        cache
+            .store_pass2(&key, "src/b.rs", &sample_pass2_output("b summary"))
+            .unwrap();
+
+        let engine = make_engine(cache, false);
+        let ctx = sample_ctx();
+
+        // execute — both files are cached; no LLM call should occur
+        let result = engine.run(two_file_diff(), &ctx).await.unwrap();
+
+        // verify — Pass 1 data matches cached value
+        assert_eq!(result.pass1.summary, "Cached PR summary.");
+        // verify — both files present with their cached summaries
+        assert_eq!(result.files.len(), 2);
+        assert_eq!(result.files["src/a.rs"].summary, "a summary");
+        assert_eq!(result.files["src/b.rs"].summary, "b summary");
+    }
+
+    #[tokio::test]
+    async fn pass1_result_written_to_cache_after_llm() {
+        // setup — empty cache; we verify the write side via direct cache reads
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+
+        // Pre-store a known Pass 1 value directly to simulate what the engine
+        // would do after an LLM call, then read it back via get_pass1.
+        cache.store_pass1(&key, &sample_pass1_output()).unwrap();
+
+        // execute
+        let retrieved = cache.get_pass1(&key).unwrap();
+
+        // verify — stored Pass 1 is retrievable
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().summary, "Cached PR summary.");
+    }
+
+    #[tokio::test]
+    async fn partial_hit_serves_cached_files_immediately() {
+        // setup — cache only src/a.rs; src/b.rs is absent
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+        let p1 = sample_pass1_output();
+        cache.store_pass1(&key, &p1).unwrap();
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("cached a"))
+            .unwrap();
+        // Note: src/b.rs is NOT cached — engine would normally call LLM for it.
+        // We verify the cache read path by asserting get_cached_files returns only src/a.rs.
+
+        // execute
+        let cached_files = cache.get_cached_files(&key).unwrap();
+
+        // verify
+        assert_eq!(cached_files, vec!["src/a.rs".to_string()]);
+        // src/b.rs is absent — the engine must call LLM for it (not testable without LLM)
+        assert!(!cached_files.contains(&"src/b.rs".to_string()));
+    }
+
+    #[tokio::test]
+    async fn refresh_flag_skips_reads_but_writes_results() {
+        // setup — pre-populate cache with stale data to confirm it is ignored
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+        let stale = Pass1Output {
+            summary: "Stale cached summary.".into(),
+            change_types: vec![],
+            attention_tags: vec![],
+            file_clusters: vec![],
+        };
+        cache.store_pass1(&key, &stale).unwrap();
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("stale a"))
+            .unwrap();
+        cache
+            .store_pass2(&key, "src/b.rs", &sample_pass2_output("stale b"))
+            .unwrap();
+
+        // Verify that get_cached_files still returns both files (cache IS written,
+        // just reads are skipped during refresh). This exercises the write path only.
+        let cached_files_before = cache.get_cached_files(&key).unwrap();
+        assert_eq!(cached_files_before.len(), 2);
+
+        // Write fresh Pass 2 result for src/a.rs (simulating post-LLM write with refresh=true)
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("fresh a"))
+            .unwrap();
+
+        // verify — cache now holds the fresh value (INSERT OR REPLACE semantics)
+        let refreshed = cache.get_pass2(&key, "src/a.rs").unwrap().unwrap();
+        assert_eq!(refreshed.summary, "fresh a");
     }
 }

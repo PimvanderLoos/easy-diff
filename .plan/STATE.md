@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 1 — Git & Platform Integration
-## Current PR: (none — Epic 1 complete)
+## Current Epic: 2 — LLM Provider Abstraction
+## Current PR: Epic 2 PR-1 (Claude + Codex backends)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -53,6 +53,15 @@
   public-API fields not yet consumed by future epics. CLI integration test
   `no_args_exits_zero` updated to `no_args_without_token_exits_nonzero` reflecting the
   new real-work behavior. All 26 tests pass. PR #6 on GitHub.
+
+- **Epic 2 PR-0**: `LlmProvider` trait, `LlmError`, `AnyProvider` enum stub, and
+  `validate_against_schema()` helper implemented in `src/llm/mod.rs`. `LlmError` has
+  6 variants (ProcessStart, ProcessFailed, EmptyOutput, InvalidJson, ValidationFailed,
+  Io). `LlmProvider` trait uses Rust 1.75+ async-fn-in-trait (RPITIT) — no `async-trait`
+  crate needed. `AnyProvider` is an empty enum stub; variants added in PR-1/PR-2.
+  `validate_against_schema()` uses `jsonschema 0.46.5` (latest; plan anticipated 0.26).
+  3 unit tests cover valid value, missing required field, and wrong type. 28 tests
+  total pass. PR #7 on GitHub.
 
 ## In Progress
 (none)
@@ -128,6 +137,18 @@
   the test was renamed to `no_args_without_token_exits_nonzero` and asserts non-zero
   exit with a message mentioning "token" or "git repository."
 
+- **Epic 2 PR-0 — RPITIT instead of `async-trait`**: `LlmProvider::analyze()` uses
+  Rust 1.75+ return-position impl Trait in trait (RPITIT). This avoids the `async-trait`
+  crate but makes the trait not object-safe. Object-safe dispatch is handled via the
+  `AnyProvider` enum (PR-1/PR-2 add variants, PR-3 implements `LlmProvider for AnyProvider`).
+- **Epic 2 PR-0 — `jsonschema 0.46.5` vs plan's `0.26`**: The plan specified `0.26`
+  but `cargo add jsonschema` resolved to `0.46.5`. The API (`validator_for` / `iter_errors`)
+  is identical — the version bump pulled a larger dependency tree but is otherwise a no-op.
+- **Epic 2 PR-0 — `validate_against_schema` stays in `mod.rs`**: Open question resolved
+  as "keep in `mod.rs`" — single function, no benefit to a separate submodule.
+- **Epic 2 PR-0 — `analyze()` accepts `&str` prompt**: Open question resolved as
+  "plain `&str`" — structure (system vs user prompt separation) deferred to Epic 3.
+
 ## Known Issues / Tech Debt
 - **Epic 1 PR-0 — SCP detector is a heuristic**: `parse_remote_url` detects
   SSH SCP-style URLs via `url.contains('@') && url.contains(':')`. A URL like
@@ -147,6 +168,15 @@
   but worth noting — the raw API response body will be included in the error
   message.
 
+## Known Issues / Tech Debt (Epic 2)
+- **Epic 2 PR-0 — `AnyProvider` is uninhabited**: The empty enum cannot be constructed
+  until PR-1 adds its `Claude` and `Codex` variants. This is intentional and expected
+  to resolve naturally as the epic progresses.
+- **Epic 2 PR-0 — module docstring example is `no_run`**: The example in `src/llm/mod.rs`
+  is not compiled by `cargo test`. Acceptable for now — the example references types
+  (concrete providers) that don't exist yet.
+
 ## Next Steps
-- Epic 2: LLM provider abstraction — implement `Provider` trait in `src/llm/mod.rs`,
-  wire Claude/Codex/Gemini CLI integrations, structured output via JSON schemas.
+- Epic 2 PR-1: Claude + Codex CLI backends — `ClaudeProvider`, `CodexProvider`,
+  shared `run_subprocess` and `extract_json` helpers in `src/llm/mod.rs`,
+  update `AnyProvider` with `Claude` and `Codex` variants.

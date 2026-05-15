@@ -3,7 +3,7 @@
 ## Status: Active Development
 
 ## Current Epic: 1 — Git & Platform Integration
-## Current PR: (none — starting Epic 1 PR-2)
+## Current PR: (none — Epic 1 complete)
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -43,6 +43,16 @@
   variants. 4 unit tests: list deserialization, field conversion, single PR
   deserialization, extra-field tolerance. `#![allow(dead_code)]` on both
   `platform/mod.rs` and `platform/github.rs` (removed in PR-2).
+
+- **Epic 1 PR-2**: End-to-end wiring implemented. `main.rs` extended with
+  `--pr <number>` flag; direct `git2` usage replaced by `crate::git::detect_repo_info`.
+  Full flow: detect repo → load config → check platform (GitHub only) → require token
+  → list PRs or fetch diff. `print_pr_list()` helper formats PRs with dynamic column
+  alignment. `#![allow(dead_code)]` removed from `git/mod.rs`, `platform/mod.rs`,
+  `platform/github.rs`; narrowed to field-level `#[allow(dead_code)]` on intentional
+  public-API fields not yet consumed by future epics. CLI integration test
+  `no_args_exits_zero` updated to `no_args_without_token_exits_nonzero` reflecting the
+  new real-work behavior. All 26 tests pass. PR #6 on GitHub.
 
 ## In Progress
 (none)
@@ -108,6 +118,16 @@
   dead code (GithubClient methods unreachable from main). Added to both files;
   both are removed in PR-2.
 
+- **Epic 1 PR-2 — field-level `#[allow(dead_code)]` instead of module-wide**: Removing
+  `#![allow(dead_code)]` produced warnings for public API fields not yet read from
+  `main.rs` (`remote_name`, `remote_url`, `source_branch`, `target_branch`,
+  `created_at`, `pr_number`). Suppressed at field level rather than restoring
+  module-wide suppression — makes the scope of "intentionally unused" explicit.
+- **Epic 1 PR-2 — `no_args_exits_zero` test renamed**: The old test assumed a no-op
+  invocation. Now that bare invocation does real work (repo detection → token check),
+  the test was renamed to `no_args_without_token_exits_nonzero` and asserts non-zero
+  exit with a message mentioning "token" or "git repository."
+
 ## Known Issues / Tech Debt
 - **Epic 1 PR-0 — SCP detector is a heuristic**: `parse_remote_url` detects
   SSH SCP-style URLs via `url.contains('@') && url.contains(':')`. A URL like
@@ -128,8 +148,5 @@
   message.
 
 ## Next Steps
-- Epic 1 PR-2: End-to-end wiring — `main.rs` detects repo, loads config,
-  fetches open PRs from GitHub, prints them. `--pr <number>` flag fetches and
-  displays the raw unified diff. Removes direct `git2` usage from `main.rs`.
-  Removes `#![allow(dead_code)]` from `git/mod.rs`, `platform/mod.rs`, and
-  `platform/github.rs`.
+- Epic 2: LLM provider abstraction — implement `Provider` trait in `src/llm/mod.rs`,
+  wire Claude/Codex/Gemini CLI integrations, structured output via JSON schemas.

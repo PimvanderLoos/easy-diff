@@ -67,8 +67,30 @@ pub enum AnyProvider {
     Claude(claude::ClaudeProvider),
     /// Codex CLI backend.
     Codex(codex::CodexProvider),
-    /// Gemini CLI backend (retry logic added in PR-2).
+    /// Gemini CLI backend with schema-validation retry logic.
     Gemini(gemini::GeminiProvider),
+}
+
+impl LlmProvider for AnyProvider {
+    fn name(&self) -> &str {
+        match self {
+            Self::Claude(p) => p.name(),
+            Self::Codex(p) => p.name(),
+            Self::Gemini(p) => p.name(),
+        }
+    }
+
+    async fn analyze(
+        &self,
+        prompt: &str,
+        schema: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        match self {
+            Self::Claude(p) => p.analyze(prompt, schema).await,
+            Self::Codex(p) => p.analyze(prompt, schema).await,
+            Self::Gemini(p) => p.analyze(prompt, schema).await,
+        }
+    }
 }
 
 /// Spawns `program` with `args`, writes `input` to its stdin, and returns

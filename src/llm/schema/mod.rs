@@ -14,6 +14,7 @@
 //! assert!(pass2_schema.is_object());
 //! ```
 
+use crate::categories::{AttentionTag, ChangeType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -23,10 +24,10 @@ use serde::{Deserialize, Serialize};
 pub struct Pass1Output {
     /// One-paragraph summary of the overall change.
     pub summary: String,
-    /// Change types present across the whole PR (e.g. "feature", "refactor").
-    pub change_types: Vec<String>,
-    /// Attention tags raised at the PR level (e.g. "security", "breaking-change").
-    pub attention_tags: Vec<String>,
+    /// Change types present across the whole PR.
+    pub change_types: Vec<ChangeType>,
+    /// Attention tags raised at the PR level.
+    pub attention_tags: Vec<AttentionTag>,
     /// Logical groupings of related files.
     pub file_clusters: Vec<FileCluster>,
 }
@@ -50,9 +51,9 @@ pub struct Pass2Output {
     /// One-paragraph summary of changes in this file.
     pub summary: String,
     /// Change types for this file specifically.
-    pub change_types: Vec<String>,
+    pub change_types: Vec<ChangeType>,
     /// Attention tags raised for this file.
-    pub attention_tags: Vec<String>,
+    pub attention_tags: Vec<AttentionTag>,
     /// Notable observations (e.g. edge cases, risks, suggestions).
     pub details: Vec<String>,
 }
@@ -76,6 +77,7 @@ pub fn schema_for_pass2() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::categories::{AttentionTag, ChangeType};
     use serde_json::json;
 
     #[test]
@@ -109,8 +111,8 @@ mod tests {
         // setup
         let original = Pass1Output {
             summary: "Added auth middleware.".into(),
-            change_types: vec!["feature".into()],
-            attention_tags: vec!["security".into()],
+            change_types: vec![ChangeType::Feature],
+            attention_tags: vec![AttentionTag::Security],
             file_clusters: vec![FileCluster {
                 label: "Auth".into(),
                 files: vec!["src/auth.rs".into()],
@@ -136,7 +138,7 @@ mod tests {
         // setup
         let original = Pass2Output {
             summary: "Refactored error handling.".into(),
-            change_types: vec!["refactor".into()],
+            change_types: vec![ChangeType::Refactor],
             attention_tags: vec![],
             details: vec!["Removed unwrap() calls.".into()],
         };

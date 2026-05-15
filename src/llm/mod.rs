@@ -53,7 +53,6 @@ pub trait LlmProvider: Send + Sync {
 
     /// Sends `prompt` to the LLM and returns a [`serde_json::Value`] that
     /// conforms to `schema`.
-    #[allow(dead_code)]
     async fn analyze(
         &self,
         prompt: &str,
@@ -107,7 +106,6 @@ pub struct LlmDispatcher {
 
 impl LlmDispatcher {
     /// Sends `prompt` to the default provider; falls back to the secondary on error.
-    #[allow(dead_code)]
     pub async fn analyze(
         &self,
         prompt: &str,

@@ -83,3 +83,25 @@ fn version_output_contains_crate_version() {
         "version output should contain the crate version; got: {stdout}"
     );
 }
+
+#[test]
+fn unreviewed_flag_is_accepted() {
+    // setup — the flag must be accepted by the CLI argument parser; runtime failure
+    // (missing token, no git repo) is expected and is not what we are testing here.
+    let output = binary()
+        .arg("--unreviewed")
+        .output()
+        .expect("failed to spawn binary");
+
+    // verify — flag must not cause an "unexpected argument" / "unknown flag" error;
+    // the binary may fail for other reasons (no repo, no token) which is fine.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument '--unreviewed'"),
+        "--unreviewed should be a known flag; got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("error: Found argument '--unreviewed'"),
+        "--unreviewed should be a known flag; got: {stderr}"
+    );
+}

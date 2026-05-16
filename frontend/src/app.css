@@ -1,0 +1,187 @@
+/* IBM Plex fonts — loaded via @fontsource, no CDN dependency. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/* Tailwind CSS v4 — single import, config is CSS-first via @theme. */
+@import "tailwindcss";
+
+/* ── Design tokens ─────────────────────────────────────────────────────────
+ *
+ * ED_TOKENS from shared.jsx mapped to CSS custom properties.
+ * Light theme is the default (:root).  Adding `class="dark"` to <html>
+ * switches every token to the dark palette via the .dark block.
+ *
+ * @custom-variant dark makes all `dark:` utilities respond to the `.dark`
+ * class on an ancestor element (Tailwind v4 class-based dark mode).
+ * ─────────────────────────────────────────────────────────────────────── */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Surfaces */
+  --ed-bg: #ffffff;
+  --ed-panel: #f6f8fa;
+  --ed-elevated: #ffffff;
+
+  /* Borders */
+  --ed-border: #d0d7de;
+  --ed-border-subtle: #eaeef2;
+
+  /* Text */
+  --ed-text: #1f2328;
+  --ed-text-muted: #59636e;
+  --ed-text-faint: #8c959f;
+
+  /* Accent */
+  --ed-accent: #0969da;
+  --ed-accent-soft: rgba(9, 105, 218, 0.1);
+
+  /* Diff: added */
+  --ed-added: #1a7f37;
+  --ed-added-bg: #dafbe1;
+  --ed-added-gutter: #aceebb;
+
+  /* Diff: removed */
+  --ed-removed: #cf222e;
+  --ed-removed-bg: #ffebe9;
+  --ed-removed-gutter: #ff818266;
+
+  /* Risky / warning */
+  --ed-risky: #9a6700;
+  --ed-risky-bg: #fff8c5;
+
+  /* Selection highlight */
+  --ed-selection: rgba(9, 105, 218, 0.1);
+
+  /* Syntax highlighting (light) */
+  --ed-sx-keyword: #cf222e;
+  --ed-sx-type: #953800;
+  --ed-sx-string: #0a3069;
+  --ed-sx-number: #0550ae;
+  --ed-sx-comment: #6e7781;
+  --ed-sx-anno: #8250df;
+  --ed-sx-method: #8250df;
+  --ed-sx-punct: #1f2328;
+}
+
+.dark {
+  /* Surfaces */
+  --ed-bg: #0d1117;
+  --ed-panel: #161b22;
+  --ed-elevated: #1c2128;
+
+  /* Borders */
+  --ed-border: #30363d;
+  --ed-border-subtle: #21262d;
+
+  /* Text */
+  --ed-text: #e6edf3;
+  --ed-text-muted: #8b949e;
+  --ed-text-faint: #6e7681;
+
+  /* Accent */
+  --ed-accent: #58a6ff;
+  --ed-accent-soft: rgba(88, 166, 255, 0.12);
+
+  /* Diff: added */
+  --ed-added: #3fb950;
+  --ed-added-bg: rgba(63, 185, 80, 0.1);
+  --ed-added-gutter: rgba(63, 185, 80, 0.3);
+
+  /* Diff: removed */
+  --ed-removed: #f85149;
+  --ed-removed-bg: rgba(248, 81, 73, 0.1);
+  --ed-removed-gutter: rgba(248, 81, 73, 0.3);
+
+  /* Risky / warning */
+  --ed-risky: #d29922;
+  --ed-risky-bg: rgba(210, 153, 34, 0.1);
+
+  /* Selection highlight */
+  --ed-selection: rgba(88, 166, 255, 0.18);
+
+  /* Syntax highlighting (dark) */
+  --ed-sx-keyword: #ff7b72;
+  --ed-sx-type: #79c0ff;
+  --ed-sx-string: #a5d6ff;
+  --ed-sx-number: #79c0ff;
+  --ed-sx-comment: #8b949e;
+  --ed-sx-anno: #d2a8ff;
+  --ed-sx-method: #d2a8ff;
+  --ed-sx-punct: #e6edf3;
+}
+
+/* ── Tailwind theme extension ──────────────────────────────────────────────
+ *
+ * Wire the CSS custom properties into Tailwind's colour namespace so utility
+ * classes like `bg-ed-bg`, `text-ed-text`, `border-ed-border`, etc. work.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Typography */
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Surface colours */
+  --color-ed-bg: var(--ed-bg);
+  --color-ed-panel: var(--ed-panel);
+  --color-ed-elevated: var(--ed-elevated);
+
+  /* Border colours */
+  --color-ed-border: var(--ed-border);
+  --color-ed-border-subtle: var(--ed-border-subtle);
+
+  /* Text colours */
+  --color-ed-text: var(--ed-text);
+  --color-ed-text-muted: var(--ed-text-muted);
+  --color-ed-text-faint: var(--ed-text-faint);
+
+  /* Accent colours */
+  --color-ed-accent: var(--ed-accent);
+  --color-ed-accent-soft: var(--ed-accent-soft);
+
+  /* Diff colours */
+  --color-ed-added: var(--ed-added);
+  --color-ed-added-bg: var(--ed-added-bg);
+  --color-ed-added-gutter: var(--ed-added-gutter);
+  --color-ed-removed: var(--ed-removed);
+  --color-ed-removed-bg: var(--ed-removed-bg);
+  --color-ed-removed-gutter: var(--ed-removed-gutter);
+
+  /* Risky */
+  --color-ed-risky: var(--ed-risky);
+  --color-ed-risky-bg: var(--ed-risky-bg);
+
+  /* Selection */
+  --color-ed-selection: var(--ed-selection);
+
+  /* Syntax colours */
+  --color-ed-sx-keyword: var(--ed-sx-keyword);
+  --color-ed-sx-type: var(--ed-sx-type);
+  --color-ed-sx-string: var(--ed-sx-string);
+  --color-ed-sx-number: var(--ed-sx-number);
+  --color-ed-sx-comment: var(--ed-sx-comment);
+  --color-ed-sx-anno: var(--ed-sx-anno);
+  --color-ed-sx-method: var(--ed-sx-method);
+  --color-ed-sx-punct: var(--ed-sx-punct);
+}
+
+/* ── Base styles ─────────────────────────────────────────────────────────── */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background-color: var(--ed-bg);
+  color: var(--ed-text);
+  height: 100%;
+}
+
+#app {
+  height: 100%;
+}

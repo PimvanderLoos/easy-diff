@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 9 — Review Workflow (COMPLETE)
-## Next Epic: 10 — BitBucket Cloud Support
+## Current Epic: 10 — BitBucket Cloud Support (COMPLETE)
+## Next Epic: 11 — Language-Specific Rules
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -255,6 +255,18 @@
   `SubmitReviewDialog.svelte` modal with verdict selection, body textarea,
   include-summary toggle, and comment count. PR #34 on GitHub.
 
+- **Epic 10 PR-0**: BitBucket Cloud REST API client. `BitbucketClient` in
+  `src/platform/bitbucket.rs` with HTTP Basic auth (username + app password).
+  `list_open_pull_requests`, `get_pull_request`, `get_pull_request_diff` via
+  REST API 2.0. `BitbucketOperations` trait. Author nickname fallback to
+  display_name. 6 unit tests. PR #35 on GitHub.
+
+- **Epic 10 PR-1**: Platform routing. `PlatformClient` enum and
+  `create_platform_client()` factory in `src/platform/mod.rs`. Removes
+  GitHub-only platform rejection from `main.rs`. Both CLI and GUI route through
+  the unified client. `submit_review` returns `Unsupported` error for BitBucket.
+  PR #36 on GitHub.
+
 ## In Progress
 (none)
 
@@ -430,9 +442,16 @@
 - **No BitBucket submission**: Per spec, submission is GitHub-only in Epic 9.
   BitBucket support deferred to Epic 10.
 
+## Decisions & Divergences (Epic 10)
+- **No review submission for BitBucket**: Per ROADMAP, BitBucket review submission
+  is deferred to Epic 11. `PlatformClient::submit_review` returns `Unsupported`
+  error for BitBucket.
+- **`#[allow(dead_code)]` pattern**: Same approach as Epic 9 — review/submit items
+  are only called from `gui` feature-gated code. `Unsupported` variant and
+  `submit_review` on `PlatformClient` suppressed with allow.
+
 ## Next Steps
-- Epic 10: BitBucket Cloud Support — REST API client, PR listing, diff fetching,
-  review submission, dual-platform routing.
+- Epics 6–10 complete. All requested epics built and merged.
 
 ## Post-MVP Addons Completed
 - **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`

@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 7 — Tauri GUI Shell + PR Selection Screen (COMPLETE)
-## Next Epic: 8 — GUI Diff Viewer + Inspector
+## Current Epic: 8 — GUI Diff Viewer + Inspector (COMPLETE)
+## Next Epic: 9 — Review Workflow
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -219,6 +219,21 @@
   - 145 Rust tests pass. `cargo clippy -- -D warnings`, `cargo fmt --check` pass.
   - `npm run build` and `npm run check` both pass with 0 errors.
 
+- **Epic 8 PR-1**: File panels, inline diff renderer, syntax highlighting.
+  MainToolbar, FilePanel, FileHeader, FileTagRow, HunkSection, InlineDiff
+  (5-column CSS Grid), LineStripe, StatusPill, SegToggle, PillSelect, IconBtn.
+  Regex-based Java + YAML syntax highlighter in `syntax.ts`. PR #29 on GitHub.
+
+- **Epic 8 PR-2**: Split diff view and filter dimming. SplitDiff (side-by-side
+  with paired del/add lines), DiffView dispatcher, `filters.ts` (linePasses,
+  lineTags). Non-passing add/del lines dimmed at opacity 0.32 + saturate(0.65).
+  SegToggle wired to diffViewMode store. PR #30 on GitHub.
+
+- **Epic 8 PR-3**: Inspector panel and review tracking. InspectorPanel with
+  selected change, rationale, confidence bar, status, actions. Click-to-focus
+  hunks. Auto-collapse on review, auto-expand on unmark. Progress bar and Show
+  counts update live from stores. PR #31 on GitHub.
+
 ## In Progress
 (none)
 
@@ -379,9 +394,16 @@
 - **Missing PR metadata**: `files`, `adds`, `dels`, `risky` not available from
   `list_pull_requests` API — displayed as "—" in the UI. Future enrichment possible.
 
+## Decisions & Divergences (Epic 8 cont.)
+- **Custom CSS diff renderer**: Uses CSS Grid instead of CodeMirror 6, as specified
+  in ROADMAP. Gives precise control over tag stripes, filter dimming, and annotations.
+- **AnalysisEngine !Send workaround**: `run_analysis` Tauri command uses
+  `spawn_blocking` + nested `current_thread` tokio runtime because `rusqlite::Connection`
+  (via `RefCell`) makes `AnalysisEngine` `!Send`.
+
 ## Next Steps
-- Epic 8 PR-1: Custom grid-based diff renderer (InlineDiff + SplitDiff), MainToolbar,
-  FilePanel, FileHeader, HunkSection, get_diff wired into ReviewScreen.
+- Epic 9: Review Workflow — comment creation, local storage, submission to
+  GitHub/BitBucket, right-click context menu for manual recategorization.
 
 ## Post-MVP Addons Completed
 - **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`

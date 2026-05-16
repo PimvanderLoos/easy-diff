@@ -8,6 +8,7 @@
  * Review-specific stores:
  * - `filterState` — active change-type / attention-tag filters for the diff viewer.
  * - `reviewedFiles` — set of file paths the user has marked as reviewed.
+ * - `diffViewMode` — whether the diff is shown inline (unified) or split (side-by-side).
  */
 
 import { writable } from "svelte/store";
@@ -40,3 +41,11 @@ export const filterState = writable<FilterState>({
  * The progress bar in the left rail reflects this set's size.
  */
 export const reviewedFiles = writable<Set<string>>(new Set());
+
+/**
+ * Current diff view mode: `"inline"` (unified) or `"split"` (side-by-side).
+ *
+ * Driven by the SegToggle in MainToolbar. HunkSection reads this to choose
+ * between InlineDiff and SplitDiff.
+ */
+export const diffViewMode = writable<"inline" | "split">("inline");

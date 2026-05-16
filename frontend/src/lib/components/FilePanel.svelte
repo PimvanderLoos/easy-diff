@@ -56,6 +56,8 @@
     isDark: boolean;
     /** Active filter for dimming non-matching lines. */
     filter?: FilterState | null;
+    /** Diff view mode: inline (unified) or split (side-by-side). */
+    diffView?: "inline" | "split";
   }
 
   let {
@@ -69,6 +71,7 @@
     focusedHunkId = null,
     isDark,
     filter = null,
+    diffView = "inline",
   }: Props = $props();
 
   /**
@@ -117,6 +120,7 @@
         focused={focusedHunkId === hunk.id}
         {isDark}
         {filter}
+        {diffView}
       />
     {/each}
   {/if}

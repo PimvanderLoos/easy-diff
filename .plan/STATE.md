@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 5 — CLI MVP (COMPLETE)
-## Next Epic: 6 — BitBucket Cloud Support
+## Current Epic: 6 — Progressive Diffs (COMPLETE)
+## Next Epic: 7 — Tauri GUI Shell + PR Selection Screen
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -169,6 +169,27 @@
     155k-token diff and from Claude on a 7k-token diff. The debug dump
     feature will capture the actual response for diagnosis next time it occurs.
 
+- **Epic 6 PR-0**: Incremental diff detection and selective re-analysis.
+  `get_latest_head_sha` added to `CacheStore`. `changed_files_between` helper
+  in `src/git/mod.rs` uses git2 tree diffs. `AnalysisEngine::run()` detects
+  prior analysis at different head SHA and activates incremental mode: Pass 1
+  always re-runs (with previous output as context), unchanged files reuse
+  cached Pass 2 results. `build_pass1_prompt` gains `previous_summary` param.
+  138 tests pass. PR #22 on GitHub.
+
+- **Epic 6 PR-1**: Mark-as-viewed tracking. `viewed_files` table added to
+  SQLite cache (`pr_id, file_path, head_sha, viewed_at`). `mark_viewed`,
+  `get_viewed_sha`, `list_viewed` methods on `CacheStore`. `AnalysisResult`
+  gains `has_changes_since_viewed: HashMap<String, bool>`. `--mark-viewed`
+  CLI flag records current head SHA as viewed after rendering. 145 tests pass.
+  PR #23 on GitHub.
+
+- **Epic 6 PR-2**: "Show only unreviewed" filter mode. `--unreviewed` CLI flag
+  filters output to files with changes since last review. `filter_unreviewed`
+  in diff module. TUI `select_unreviewed_filter` prompt. Summary line:
+  `[review] N of M files have changes since last review`. Clean exit when all
+  reviewed. 150 tests pass. PR #24 on GitHub.
+
 ## In Progress
 (none)
 
@@ -306,8 +327,8 @@
   noting if Gemini CLI ever gains network-rate-limit behavior.
 
 ## Next Steps
-- Epic 6: BitBucket Cloud Support — REST API client, remote URL parsing, platform
-  auto-detection for both GitHub and BitBucket.
+- Epic 7: Tauri GUI Shell + PR Selection Screen — Tauri v2 + Svelte + TypeScript
+  frontend scaffold, design token system, shared components, PR selection screen.
 
 ## Post-MVP Addons Completed
 - **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`

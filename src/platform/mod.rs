@@ -4,9 +4,17 @@
 //! The [`Platform`] enum identifies the hosting service from a remote URL.
 //! [`PullRequest`] and [`PullRequestDiff`] are platform-agnostic types returned
 //! by all clients. [`PlatformError`] covers the full range of API failure modes.
+//!
+//! For GitHub, two backends are available:
+//! - [`github::GithubClient`] — REST API with personal access token
+//! - [`github_gh::GhClient`] — `gh` CLI wrapper using `gh auth login` credentials
+//!
+//! Use [`github_provider::create_github_provider`] to select the appropriate backend.
 
 pub mod bitbucket;
 pub mod github;
+pub mod github_gh;
+pub mod github_provider;
 
 /// Supported code hosting platforms, identified from remote URLs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +66,35 @@ pub struct PullRequestDiff {
     pub pr_number: u64,
     /// Full unified diff as a string.
     pub diff: String,
+}
+
+/// Trait for GitHub operations (list PRs, get metadata, get diff).
+///
+/// Implemented by both the REST API client and the `gh` CLI client.
+#[allow(async_fn_in_trait)]
+pub trait GithubOperations {
+    /// Lists open pull requests for the given repository.
+    async fn list_open_pull_requests(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequest>, PlatformError>;
+
+    /// Fetches metadata for a specific pull request.
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequest, PlatformError>;
+
+    /// Fetches the unified diff for a specific pull request.
+    async fn get_pull_request_diff(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequestDiff, PlatformError>;
 }
 
 /// Errors from platform API calls.

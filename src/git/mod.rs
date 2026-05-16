@@ -31,6 +31,8 @@ pub struct RepoInfo {
     pub root: PathBuf,
     /// Hosting platform detected from the remote URL.
     pub platform: Platform,
+    /// Hostname of the remote (e.g. `"github.com"`, `"github.example.com"`).
+    pub host: String,
     /// Repository owner (user or organization).
     pub owner: String,
     /// Repository name (without `.git` suffix).
@@ -58,10 +60,11 @@ pub fn detect_repo_info(path: impl AsRef<Path>) -> Result<RepoInfo, GitError> {
     let url_str = remote.url().ok_or_else(|| GitError::NoRemoteUrl {
         name: "origin".into(),
     })?;
-    let (platform, owner, repo_name) = parse_remote_url(url_str)?;
+    let (platform, host, owner, repo_name) = parse_remote_url(url_str)?;
     Ok(RepoInfo {
         root,
         platform,
+        host,
         owner,
         repo: repo_name,
         remote_name: "origin".into(),
@@ -69,13 +72,13 @@ pub fn detect_repo_info(path: impl AsRef<Path>) -> Result<RepoInfo, GitError> {
     })
 }
 
-/// Parses a git remote URL and extracts platform, owner, and repo name.
+/// Parses a git remote URL and extracts platform, host, owner, and repo name.
 ///
 /// Supported formats:
 /// - HTTPS: `https://github.com/owner/repo[.git]`
 /// - SSH SCP-style: `git@github.com:owner/repo[.git]`
 /// - SSH protocol: `ssh://[user@]github.com[:port]/owner/repo[.git]`
-fn parse_remote_url(url: &str) -> Result<(Platform, String, String), GitError> {
+fn parse_remote_url(url: &str) -> Result<(Platform, String, String, String), GitError> {
     let unparseable = || GitError::UnparseableUrl {
         url: url.to_string(),
     };
@@ -142,19 +145,29 @@ fn parse_remote_url(url: &str) -> Result<(Platform, String, String), GitError> {
         return Err(unparseable());
     }
 
-    Ok((platform, owner, repo))
+    Ok((platform, host, owner, repo))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn github(owner: &str, repo: &str) -> (Platform, String, String) {
-        (Platform::GitHub, owner.into(), repo.into())
+    fn github(owner: &str, repo: &str) -> (Platform, String, String, String) {
+        (
+            Platform::GitHub,
+            "github.com".into(),
+            owner.into(),
+            repo.into(),
+        )
     }
 
-    fn bitbucket(owner: &str, repo: &str) -> (Platform, String, String) {
-        (Platform::BitBucket, owner.into(), repo.into())
+    fn bitbucket(owner: &str, repo: &str) -> (Platform, String, String, String) {
+        (
+            Platform::BitBucket,
+            "bitbucket.org".into(),
+            owner.into(),
+            repo.into(),
+        )
     }
 
     #[test]
@@ -243,6 +256,7 @@ mod tests {
 
         let info = detect_repo_info(dir.path()).unwrap();
         assert_eq!(info.platform, Platform::GitHub);
+        assert_eq!(info.host, "github.com");
         assert_eq!(info.owner, "testowner");
         assert_eq!(info.repo, "testrepo");
         assert_eq!(info.remote_name, "origin");

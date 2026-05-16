@@ -65,6 +65,20 @@ pub struct AnalysisResult {
     pub files: HashMap<String, Pass2Output>,
 }
 
+/// Internal state for incremental re-analysis.
+///
+/// Populated when a previous analysis is found for the same PR and base SHA
+/// but a different head SHA.
+struct IncrementalState {
+    /// The head SHA of the previously cached analysis.
+    old_head_sha: String,
+    /// Pass 1 output from the previous analysis, used as a context hint.
+    previous_pass1: Pass1Output,
+    /// Set of file paths that changed between `old_head_sha` and the current head.
+    /// Only these files require re-analysis; all others reuse their cached results.
+    changed_files: HashSet<String>,
+}
+
 /// Orchestrates the two-pass analysis pipeline.
 ///
 /// Pass 1 analyses the entire diff at once; Pass 2 analyses each file in
@@ -126,15 +140,43 @@ impl AnalysisEngine {
     /// to keep all SQLite access single-threaded. Cache writes happen after each
     /// batch of spawned tasks completes.
     ///
+    /// When the cache contains a previous analysis for the same PR and base SHA
+    /// but a different head SHA, incremental mode is activated: only files changed
+    /// between the old and new head are re-analysed; unchanged files reuse the
+    /// previous Pass 2 results. Pass 1 is always re-run in incremental mode with
+    /// the previous output as context.
+    ///
     /// Files that fail Pass 2 are omitted from `result.files`; a warning is
     /// logged for each failure.
     pub async fn run(&self, diff: &str, ctx: &PrContext) -> anyhow::Result<AnalysisResult> {
+        let provider_name = self.dispatcher.provider_name().to_owned();
         let cache_key = self.cache.as_ref().map(|_| CacheKey {
             pr_id: ctx.pr_number.to_string(),
             base_sha: ctx.base_sha.clone(),
             head_sha: ctx.head_sha.clone(),
-            provider: self.dispatcher.provider_name().to_owned(),
+            provider: provider_name.clone(),
         });
+
+        // ── Incremental detection ───────────────────────────────────────────
+        // Check whether a previous analysis exists for the same PR+base but a
+        // different head SHA. When found (and refresh is not set), activate
+        // incremental mode: re-use Pass 2 results for unchanged files and
+        // provide the previous Pass 1 as context for re-analysis.
+        let incremental: Option<IncrementalState> =
+            if let (Some(cache), false) = (self.cache.as_ref(), self.refresh) {
+                self.detect_incremental(cache, ctx, &provider_name)
+            } else {
+                None
+            };
+
+        if incremental.is_some() {
+            tracing::info!(
+                pr = ctx.pr_number,
+                old_head = incremental.as_ref().map(|s| s.old_head_sha.as_str()),
+                new_head = %ctx.head_sha,
+                "incremental mode activated"
+            );
+        }
 
         // ── Pass 1 ─────────────────────────────────────────────────────────
         let file_pairs = split_diff_by_file(diff);
@@ -143,11 +185,14 @@ impl AnalysisEngine {
         let line_count = diff.lines().count() as u32;
         let large_pr = line_count > self.large_pr_threshold;
 
-        // Check cache for Pass 1 (skipped when refresh=true or no cache).
+        // In incremental mode, Pass 1 is always re-run (with previous as context).
+        // In normal mode, check the cache first.
+        let previous_pass1_ref = incremental.as_ref().map(|s| &s.previous_pass1);
+
         let pass1: Pass1Output = if let Some((cache, key)) =
             self.cache.as_ref().zip(cache_key.as_ref())
         {
-            if !self.refresh {
+            if !self.refresh && incremental.is_none() {
                 match cache.get_pass1(key) {
                     Ok(Some(cached)) => {
                         tracing::info!("Pass 1 cache hit — skipping LLM call");
@@ -155,22 +200,40 @@ impl AnalysisEngine {
                     }
                     Ok(None) => {
                         tracing::debug!("Pass 1 cache miss — running LLM");
-                        self.run_pass1_llm(diff, &file_names, large_pr, Some((cache, key)))
-                            .await?
+                        self.run_pass1_llm(
+                            diff,
+                            &file_names,
+                            large_pr,
+                            previous_pass1_ref,
+                            Some((cache, key)),
+                        )
+                        .await?
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Pass 1 cache read error — falling back to LLM");
-                        self.run_pass1_llm(diff, &file_names, large_pr, Some((cache, key)))
-                            .await?
+                        self.run_pass1_llm(
+                            diff,
+                            &file_names,
+                            large_pr,
+                            previous_pass1_ref,
+                            Some((cache, key)),
+                        )
+                        .await?
                     }
                 }
             } else {
-                // refresh=true: skip read, still write
-                self.run_pass1_llm(diff, &file_names, large_pr, Some((cache, key)))
-                    .await?
+                // refresh=true or incremental mode: skip read, still write
+                self.run_pass1_llm(
+                    diff,
+                    &file_names,
+                    large_pr,
+                    previous_pass1_ref,
+                    Some((cache, key)),
+                )
+                .await?
             }
         } else {
-            self.run_pass1_llm(diff, &file_names, large_pr, None)
+            self.run_pass1_llm(diff, &file_names, large_pr, previous_pass1_ref, None)
                 .await?
         };
 
@@ -181,6 +244,8 @@ impl AnalysisEngine {
 
         // ── Pass 2 — determine which files need LLM analysis ────────────────
         // Read cached files list on the main task (no Send required).
+        // In incremental mode, we also populate results from the old head cache
+        // for files that were NOT changed between old_head and new_head.
         let cached_files: HashSet<String> = if let Some((cache, key)) =
             self.cache.as_ref().zip(cache_key.as_ref())
         {
@@ -204,6 +269,7 @@ impl AnalysisEngine {
         let mut uncached_pairs: Vec<(String, String)> = Vec::new();
 
         for (file_path, file_diff) in file_pairs {
+            // Normal cache hit (current head_sha).
             if cached_files.contains(&file_path) {
                 if let Some((cache, key)) = self.cache.as_ref().zip(cache_key.as_ref()) {
                     match cache.get_pass2(key, &file_path) {
@@ -221,6 +287,55 @@ impl AnalysisEngine {
                     }
                 }
             }
+
+            // Incremental cache hit: file was not changed between old and new head,
+            // so reuse the Pass 2 result from the old head's cache key.
+            if let Some(ref inc) = incremental {
+                if !inc.changed_files.contains(&file_path) {
+                    if let Some(cache) = self.cache.as_ref() {
+                        let old_key = CacheKey {
+                            pr_id: ctx.pr_number.to_string(),
+                            base_sha: ctx.base_sha.clone(),
+                            head_sha: inc.old_head_sha.clone(),
+                            provider: provider_name.clone(),
+                        };
+                        match cache.get_pass2(&old_key, &file_path) {
+                            Ok(Some(output)) => {
+                                tracing::debug!(
+                                    file = %file_path,
+                                    "Pass 2 incremental cache hit (unchanged file)"
+                                );
+                                // Promote result to the new head's cache key.
+                                if let Some(key) = cache_key.as_ref() {
+                                    if let Err(e) = cache.store_pass2(key, &file_path, &output) {
+                                        tracing::warn!(
+                                            file = %file_path,
+                                            error = %e,
+                                            "failed to promote incremental Pass 2 result"
+                                        );
+                                    }
+                                }
+                                files.insert(file_path, output);
+                                continue;
+                            }
+                            Ok(None) => {
+                                tracing::debug!(
+                                    file = %file_path,
+                                    "incremental: old cache miss — will re-analyse"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    file = %file_path,
+                                    error = %e,
+                                    "incremental Pass 2 cache read error"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
             uncached_pairs.push((file_path, file_diff));
         }
 
@@ -328,11 +443,15 @@ impl AnalysisEngine {
     }
 
     /// Calls the LLM for Pass 1 and optionally writes the result to cache.
+    ///
+    /// When `previous_pass1` is `Some`, the previous Pass 1 output is included
+    /// in the prompt as an incremental analysis hint.
     async fn run_pass1_llm(
         &self,
         diff: &str,
         file_names: &[&str],
         large_pr: bool,
+        previous_pass1: Option<&Pass1Output>,
         cache: Option<(&CacheStore, &CacheKey)>,
     ) -> anyhow::Result<Pass1Output> {
         if large_pr {
@@ -342,7 +461,7 @@ impl AnalysisEngine {
             );
         }
 
-        let pass1_prompt = build_pass1_prompt(diff, file_names, large_pr);
+        let pass1_prompt = build_pass1_prompt(diff, file_names, large_pr, previous_pass1);
         let pass1_schema = schema_for_pass1();
 
         let pass1_value = self
@@ -373,6 +492,80 @@ impl AnalysisEngine {
         }
 
         Ok(pass1)
+    }
+
+    /// Checks the cache for a previous analysis of the same PR at a different head SHA.
+    ///
+    /// Returns `Some(IncrementalState)` when:
+    /// - A previous Pass 1 entry exists for `(pr_id, base_sha, provider)`.
+    /// - The stored head SHA differs from `ctx.head_sha`.
+    /// - The list of changed files between the old and new head can be computed.
+    ///
+    /// Returns `None` when no prior analysis exists or any step fails (falling back
+    /// to a full analysis).
+    fn detect_incremental(
+        &self,
+        cache: &CacheStore,
+        ctx: &PrContext,
+        provider: &str,
+    ) -> Option<IncrementalState> {
+        let pr_id = ctx.pr_number.to_string();
+
+        let old_head_sha = match cache.get_latest_head_sha(&pr_id, &ctx.base_sha, provider) {
+            Ok(Some(sha)) if sha != ctx.head_sha => sha,
+            Ok(_) => return None, // no previous, or same head (already current)
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to query previous head SHA — skipping incremental");
+                return None;
+            }
+        };
+
+        let old_key = CacheKey {
+            pr_id: pr_id.clone(),
+            base_sha: ctx.base_sha.clone(),
+            head_sha: old_head_sha.clone(),
+            provider: provider.to_owned(),
+        };
+
+        let previous_pass1 = match cache.get_pass1(&old_key) {
+            Ok(Some(p1)) => p1,
+            Ok(None) => {
+                tracing::debug!("no Pass 1 in old cache — skipping incremental");
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load previous Pass 1 — skipping incremental");
+                return None;
+            }
+        };
+
+        let changed_files = match crate::git::changed_files_between(
+            &self.repo_root,
+            &old_head_sha,
+            &ctx.head_sha,
+        ) {
+            Ok(fs) => fs.into_iter().collect::<HashSet<String>>(),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    old_head = %old_head_sha,
+                    new_head = %ctx.head_sha,
+                    "failed to compute changed files — falling back to full analysis"
+                );
+                return None;
+            }
+        };
+
+        tracing::debug!(
+            changed = changed_files.len(),
+            "incremental: computed changed file set"
+        );
+
+        Some(IncrementalState {
+            old_head_sha,
+            previous_pass1,
+            changed_files,
+        })
     }
 }
 

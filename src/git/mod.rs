@@ -23,6 +23,10 @@ pub enum GitError {
     UnparseableUrl { url: String },
     #[error("unsupported platform: {host}")]
     UnsupportedPlatform { host: String },
+    #[error("git error: {0}")]
+    Git(#[from] git2::Error),
+    #[error("commit not found: {sha}")]
+    CommitNotFound { sha: String },
 }
 
 /// Information extracted from a git repository's remote URL.
@@ -148,6 +152,66 @@ fn parse_remote_url(url: &str) -> Result<(Platform, String, String, String), Git
     Ok((platform, host, owner, repo))
 }
 
+/// Returns the list of file paths that changed between two commits.
+///
+/// Uses `git2` to compute a diff between the two tree objects and extract
+/// changed paths. Both `old_sha` and `new_sha` must refer to commits (or
+/// objects that peel to commits) present in the repository at `repo_path`.
+///
+/// Renamed files are reported as both the old path (deleted) and the new path
+/// (added), matching the behaviour of `git diff --name-only`.
+pub fn changed_files_between(
+    repo_path: impl AsRef<Path>,
+    old_sha: &str,
+    new_sha: &str,
+) -> Result<Vec<String>, GitError> {
+    let repo = Repository::discover(repo_path).map_err(|_| GitError::NotARepository)?;
+
+    let old_oid = git2::Oid::from_str(old_sha).map_err(|_| GitError::CommitNotFound {
+        sha: old_sha.to_owned(),
+    })?;
+    let new_oid = git2::Oid::from_str(new_sha).map_err(|_| GitError::CommitNotFound {
+        sha: new_sha.to_owned(),
+    })?;
+
+    let old_commit = repo
+        .find_commit(old_oid)
+        .map_err(|_| GitError::CommitNotFound {
+            sha: old_sha.to_owned(),
+        })?;
+    let new_commit = repo
+        .find_commit(new_oid)
+        .map_err(|_| GitError::CommitNotFound {
+            sha: new_sha.to_owned(),
+        })?;
+
+    let old_tree = old_commit.tree()?;
+    let new_tree = new_commit.tree()?;
+
+    let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
+
+    let mut paths: Vec<String> = Vec::new();
+    for delta in diff.deltas() {
+        if let Some(path) = delta.new_file().path() {
+            if let Some(s) = path.to_str() {
+                if !paths.contains(&s.to_owned()) {
+                    paths.push(s.to_owned());
+                }
+            }
+        }
+        // For renames/deletes, also include the old path.
+        if let Some(old_path) = delta.old_file().path() {
+            if let Some(s) = old_path.to_str() {
+                if !paths.contains(&s.to_owned()) {
+                    paths.push(s.to_owned());
+                }
+            }
+        }
+    }
+
+    Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +326,101 @@ mod tests {
         assert_eq!(info.remote_name, "origin");
         assert_eq!(info.remote_url, "https://github.com/testowner/testrepo.git");
         assert!(info.root.exists());
+    }
+
+    // ── changed_files_between tests ──────────────────────────────────────────
+
+    /// Creates a minimal git repo with two commits and returns (repo_dir, old_sha, new_sha).
+    /// Commit 1 adds "a.rs". Commit 2 adds "b.rs" and modifies "a.rs".
+    fn make_two_commit_repo() -> (tempfile::TempDir, String, String) {
+        use git2::{Repository, Signature};
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        let sig = Signature::now("Test", "test@example.com").unwrap();
+
+        // Commit 1: add a.rs
+        fs::write(dir.path().join("a.rs"), "fn a() {}").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.rs")).unwrap();
+        index.write().unwrap();
+        let tree_oid = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let oid1 = repo
+            .commit(Some("HEAD"), &sig, &sig, "first commit", &tree, &[])
+            .unwrap();
+
+        // Commit 2: modify a.rs, add b.rs
+        fs::write(dir.path().join("a.rs"), "fn a() { /* updated */ }").unwrap();
+        fs::write(dir.path().join("b.rs"), "fn b() {}").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.rs")).unwrap();
+        index.add_path(std::path::Path::new("b.rs")).unwrap();
+        index.write().unwrap();
+        let tree_oid2 = index.write_tree().unwrap();
+        let tree2 = repo.find_tree(tree_oid2).unwrap();
+        let parent = repo.find_commit(oid1).unwrap();
+        let oid2 = repo
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "second commit",
+                &tree2,
+                &[&parent],
+            )
+            .unwrap();
+
+        (dir, oid1.to_string(), oid2.to_string())
+    }
+
+    #[test]
+    fn changed_files_between_detects_modified_and_added_files() {
+        // setup
+        let (dir, old_sha, new_sha) = make_two_commit_repo();
+
+        // execute
+        let files = changed_files_between(dir.path(), &old_sha, &new_sha).unwrap();
+
+        // verify — both a.rs (modified) and b.rs (added) should appear
+        assert!(
+            files.contains(&"a.rs".to_owned()),
+            "a.rs was modified and should appear"
+        );
+        assert!(
+            files.contains(&"b.rs".to_owned()),
+            "b.rs was added and should appear"
+        );
+    }
+
+    #[test]
+    fn changed_files_between_returns_empty_for_identical_commits() {
+        // setup
+        let (dir, sha, _) = make_two_commit_repo();
+
+        // execute — diff a commit with itself
+        let files = changed_files_between(dir.path(), &sha, &sha).unwrap();
+
+        // verify
+        assert!(
+            files.is_empty(),
+            "diffing a commit with itself should return no files"
+        );
+    }
+
+    #[test]
+    fn changed_files_between_errors_on_unknown_sha() {
+        // setup
+        let (dir, _, _) = make_two_commit_repo();
+        let bad_sha = "0000000000000000000000000000000000000000";
+
+        // execute
+        let result = changed_files_between(dir.path(), bad_sha, bad_sha);
+
+        // verify
+        assert!(result.is_err(), "unknown SHA should produce an error");
     }
 }

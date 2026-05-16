@@ -223,6 +223,35 @@ impl CacheStore {
         }
     }
 
+    /// Returns the most recent head SHA for which a Pass 1 entry exists for
+    /// the given `(pr_id, base_sha, provider)` combination at the current schema version.
+    ///
+    /// Returns `None` if no previous analysis exists. The "most recent" entry is
+    /// determined by insertion order (rowid descending), which corresponds to the
+    /// last analysis run for this PR.
+    pub fn get_latest_head_sha(
+        &self,
+        pr_id: &str,
+        base_sha: &str,
+        provider: &str,
+    ) -> Result<Option<String>, CacheError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT head_sha FROM pass1_cache
+             WHERE pr_id = ?1 AND base_sha = ?2 AND provider = ?3
+               AND schema_version = ?4
+             ORDER BY rowid DESC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![pr_id, base_sha, provider, SCHEMA_VERSION])?;
+        match rows.next()? {
+            None => Ok(None),
+            Some(row) => {
+                let sha: String = row.get(0)?;
+                Ok(Some(sha))
+            }
+        }
+    }
+
     /// Returns all file paths that have a cached Pass 2 result for the given key
     /// at the current schema version.
     pub fn get_cached_files(&self, key: &CacheKey) -> Result<Vec<String>, CacheError> {
@@ -454,6 +483,71 @@ mod tests {
         for file in &files {
             assert!(cached_files.contains(&file.to_string()), "missing {file}");
         }
+    }
+
+    #[test]
+    fn get_latest_head_sha_returns_none_when_empty() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute
+        let result = store.get_latest_head_sha("42", "aaaaaa", "claude").unwrap();
+
+        // verify
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_latest_head_sha_returns_stored_sha() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let key = sample_key();
+        store.store_pass1(&key, &sample_pass1()).unwrap();
+
+        // execute
+        let result = store
+            .get_latest_head_sha(&key.pr_id, &key.base_sha, &key.provider)
+            .unwrap();
+
+        // verify
+        assert_eq!(result, Some("bbbbbb".to_owned()));
+    }
+
+    #[test]
+    fn get_latest_head_sha_returns_most_recent_when_multiple() {
+        // setup — store two entries with different head SHAs for the same PR+base+provider
+        let store = CacheStore::open_in_memory().unwrap();
+        let key1 = sample_key(); // head_sha = "bbbbbb"
+        let key2 = CacheKey {
+            head_sha: "cccccc".into(),
+            ..sample_key()
+        };
+        store.store_pass1(&key1, &sample_pass1()).unwrap();
+        store.store_pass1(&key2, &sample_pass1()).unwrap();
+
+        // execute
+        let result = store
+            .get_latest_head_sha(&key1.pr_id, &key1.base_sha, &key1.provider)
+            .unwrap();
+
+        // verify — key2 was inserted last, so cccccc should be returned
+        assert_eq!(result, Some("cccccc".to_owned()));
+    }
+
+    #[test]
+    fn get_latest_head_sha_ignores_different_pr() {
+        // setup — store for PR 42, query for PR 99
+        let store = CacheStore::open_in_memory().unwrap();
+        let key = sample_key();
+        store.store_pass1(&key, &sample_pass1()).unwrap();
+
+        // execute
+        let result = store
+            .get_latest_head_sha("99", &key.base_sha, &key.provider)
+            .unwrap();
+
+        // verify
+        assert!(result.is_none());
     }
 
     #[test]

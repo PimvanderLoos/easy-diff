@@ -9,11 +9,12 @@
 //! ```rust
 //! use easy_diff::analysis::pass1_summary::build_pass1_prompt;
 //!
-//! let prompt = build_pass1_prompt("--- a/foo.rs\n+++ b/foo.rs", &["foo.rs"], false);
+//! let prompt = build_pass1_prompt("--- a/foo.rs\n+++ b/foo.rs", &["foo.rs"], false, None);
 //! assert!(prompt.contains("foo.rs"));
 //! ```
 
 use crate::categories::{AttentionTag, ChangeType};
+use crate::llm::schema::Pass1Output;
 
 /// Builds the Pass 1 prompt for global PR analysis.
 ///
@@ -21,8 +22,18 @@ use crate::categories::{AttentionTag, ChangeType};
 /// the LLM can inspect every changed line. In large-PR mode, `large_pr = true`,
 /// only `file_names` are included to stay within context limits; the LLM is
 /// asked to classify based on file-path patterns alone.
+///
+/// When `previous_summary` is `Some`, a context section is appended that
+/// provides the previous Pass 1 output as a hint for incremental re-analysis.
+/// The LLM is instructed to update the analysis to reflect the new commits
+/// while preserving accuracy for unchanged portions.
 #[allow(dead_code)]
-pub fn build_pass1_prompt(diff: &str, file_names: &[&str], large_pr: bool) -> String {
+pub fn build_pass1_prompt(
+    diff: &str,
+    file_names: &[&str],
+    large_pr: bool,
+    previous_summary: Option<&Pass1Output>,
+) -> String {
     let mut prompt = String::new();
 
     // 1. System instruction
@@ -57,7 +68,21 @@ pub fn build_pass1_prompt(diff: &str, file_names: &[&str], large_pr: bool) -> St
          - Every changed file must appear in exactly one cluster.\n\n",
     );
 
-    // 4. Diff content or file list
+    // 4. Previous analysis context (incremental mode only)
+    if let Some(prev) = previous_summary {
+        let prev_json = serde_json::to_string_pretty(prev).unwrap_or_default();
+        prompt.push_str(
+            "## Previous Analysis Context\n\n\
+             The following is the previous analysis of this PR (before the latest commits):\n\n",
+        );
+        prompt.push_str(&prev_json);
+        prompt.push_str(
+            "\n\nUpdate the analysis to reflect the new changes while preserving \
+             accuracy for unchanged portions.\n\n",
+        );
+    }
+
+    // 5. Diff content or file list
     if large_pr {
         prompt.push_str("## Changed Files\n\n");
         prompt.push_str(
@@ -115,7 +140,7 @@ mod tests {
         let diff = "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-fn old() {}\n+fn new() {}";
 
         // execute
-        let prompt = build_pass1_prompt(diff, &[], false);
+        let prompt = build_pass1_prompt(diff, &[], false, None);
 
         // verify
         assert!(
@@ -131,7 +156,7 @@ mod tests {
         let files = &["src/main.rs", "src/lib.rs"];
 
         // execute
-        let prompt = build_pass1_prompt(diff, files, true);
+        let prompt = build_pass1_prompt(diff, files, true, None);
 
         // verify — file names present, diff body absent
         assert!(
@@ -151,7 +176,7 @@ mod tests {
     #[test]
     fn pass1_prompt_contains_all_change_types() {
         // setup + execute
-        let prompt = build_pass1_prompt("", &[], false);
+        let prompt = build_pass1_prompt("", &[], false, None);
 
         // verify — every ChangeType serialized name must appear
         for ct in ChangeType::all() {
@@ -165,7 +190,7 @@ mod tests {
     #[test]
     fn pass1_prompt_contains_all_attention_tags() {
         // setup + execute
-        let prompt = build_pass1_prompt("", &[], false);
+        let prompt = build_pass1_prompt("", &[], false, None);
 
         // verify — every AttentionTag serialized name must appear
         for tag in AttentionTag::all() {
@@ -174,5 +199,52 @@ mod tests {
                 "expected attention tag `{tag}` in prompt"
             );
         }
+    }
+
+    #[test]
+    fn pass1_prompt_with_previous_summary_includes_context_section() {
+        use crate::categories::{AttentionTag, ChangeType};
+        use crate::llm::schema::{FileCluster, Pass1Output};
+
+        // setup
+        let prev = Pass1Output {
+            summary: "Added auth middleware.".into(),
+            change_types: vec![ChangeType::Feature],
+            attention_tags: vec![AttentionTag::Security],
+            file_clusters: vec![FileCluster {
+                label: "Auth".into(),
+                files: vec!["src/auth.rs".into()],
+                rationale: "Auth changes.".into(),
+            }],
+        };
+
+        // execute
+        let prompt = build_pass1_prompt("--- a/x\n+++ b/x", &["x"], false, Some(&prev));
+
+        // verify
+        assert!(
+            prompt.contains("Previous Analysis Context"),
+            "prompt must contain the previous analysis context section header"
+        );
+        assert!(
+            prompt.contains("Added auth middleware."),
+            "prompt must embed the previous summary text"
+        );
+        assert!(
+            prompt.contains("Update the analysis"),
+            "prompt must include the update instruction"
+        );
+    }
+
+    #[test]
+    fn pass1_prompt_without_previous_summary_has_no_context_section() {
+        // setup + execute
+        let prompt = build_pass1_prompt("--- a/x\n+++ b/x", &["x"], false, None);
+
+        // verify
+        assert!(
+            !prompt.contains("Previous Analysis Context"),
+            "prompt must not contain the previous analysis context section when None"
+        );
     }
 }

@@ -1,5 +1,6 @@
 //! SQLite-backed caching layer for LLM analysis results, keyed by PR state,
-//! file path, provider, and schema version.
+//! file path, provider, and schema version. Also stores review comments and
+//! manual category overrides locally until submission.
 #![allow(dead_code)]
 //!
 //! [`CacheStore`] stores and retrieves [`Pass1Output`] and [`Pass2Output`] values.
@@ -8,6 +9,10 @@
 //!
 //! Schema version is embedded in every row; bumping [`SCHEMA_VERSION`] automatically
 //! causes all old entries to be treated as cache misses without requiring a migration.
+//!
+//! Review comments ([`ReviewComment`]) are persisted in `review_comments` and
+//! category overrides ([`CategoryOverride`]) in `category_overrides`. Both tables
+//! are not versioned — they survive schema bumps.
 //!
 //! # Example
 //! ```rust,no_run
@@ -30,9 +35,67 @@
 use std::path::Path;
 
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::llm::schema::{Pass1Output, Pass2Output};
+
+/// Status of a [`ReviewComment`]: either a local draft or already submitted to the platform.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CommentStatus {
+    /// Comment has been written locally but not yet submitted.
+    Draft,
+    /// Comment has been submitted to GitHub/BitBucket.
+    Submitted,
+}
+
+/// An inline review comment on a specific line range within a file in a PR.
+///
+/// Comments are persisted in SQLite until submission. The `id` is assigned by the
+/// database on insert; callers constructing a new comment before saving should use
+/// a sentinel value (e.g. `0`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewComment {
+    /// Database-assigned primary key. `0` before the first save.
+    pub id: i64,
+    /// Platform-specific PR identifier (e.g. GitHub PR number as string).
+    pub pr_id: String,
+    /// Relative path of the file being commented on.
+    pub file_path: String,
+    /// First line of the commented range (1-based).
+    pub start_line: u32,
+    /// Last line of the commented range, or `None` for a single-line comment.
+    pub end_line: Option<u32>,
+    /// Markdown body of the comment.
+    pub body: String,
+    /// ISO 8601 UTC timestamp when the comment was created locally.
+    pub created_at: String,
+    /// Whether the comment has been submitted to the platform.
+    pub status: CommentStatus,
+}
+
+/// A manual override of the LLM classification for a specific diff hunk.
+///
+/// Overrides are keyed by `(pr_id, file_path, hunk_id)` and replace the LLM's
+/// `change_type` and/or `attention_tags` with user-supplied values. Both fields
+/// are optional — setting only one leaves the other at its LLM-inferred value.
+///
+/// The `id` is assigned by the database on insert.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryOverride {
+    /// Database-assigned primary key.
+    pub id: i64,
+    /// Platform-specific PR identifier.
+    pub pr_id: String,
+    /// Relative path of the file containing the hunk.
+    pub file_path: String,
+    /// Identifier for the hunk being overridden (e.g. the `@@` header string).
+    pub hunk_id: String,
+    /// User-supplied change type, overriding the LLM value. `None` = no override.
+    pub change_type: Option<String>,
+    /// User-supplied attention tags, overriding the LLM value. `None` = no override.
+    pub attention_tags: Option<Vec<String>>,
+}
 
 /// Schema version embedded in every cached row. Bump to invalidate all existing entries.
 const SCHEMA_VERSION: i64 = 1;
@@ -124,6 +187,25 @@ impl CacheStore {
                 head_sha  TEXT NOT NULL,
                 viewed_at TEXT NOT NULL,
                 PRIMARY KEY (pr_id, file_path)
+            );
+            CREATE TABLE IF NOT EXISTS review_comments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                pr_id      TEXT    NOT NULL,
+                file_path  TEXT    NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line   INTEGER,
+                body       TEXT    NOT NULL,
+                created_at TEXT    NOT NULL,
+                status     TEXT    NOT NULL DEFAULT 'draft'
+            );
+            CREATE TABLE IF NOT EXISTS category_overrides (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                pr_id          TEXT NOT NULL,
+                file_path      TEXT NOT NULL,
+                hunk_id        TEXT NOT NULL,
+                change_type    TEXT,
+                attention_tags TEXT,
+                UNIQUE(pr_id, file_path, hunk_id)
             );",
         )?;
         Ok(())
@@ -309,6 +391,201 @@ impl CacheStore {
                 Ok(Some(sha))
             }
         }
+    }
+
+    // ── Review comment CRUD ──────────────────────────────────────────────────
+
+    /// Inserts a new [`ReviewComment`] and returns it with its database-assigned `id`.
+    ///
+    /// The `id` field on the input value is ignored; the returned struct reflects
+    /// the actual row id assigned by SQLite.
+    pub fn add_comment(&self, comment: &ReviewComment) -> Result<ReviewComment, CacheError> {
+        let status = match comment.status {
+            CommentStatus::Draft => "draft",
+            CommentStatus::Submitted => "submitted",
+        };
+        self.conn.execute(
+            "INSERT INTO review_comments
+                (pr_id, file_path, start_line, end_line, body, created_at, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                comment.pr_id,
+                comment.file_path,
+                comment.start_line,
+                comment.end_line,
+                comment.body,
+                comment.created_at,
+                status,
+            ],
+        )?;
+        let id = self.conn.last_insert_rowid();
+        Ok(ReviewComment {
+            id,
+            ..comment.clone()
+        })
+    }
+
+    /// Returns all [`ReviewComment`]s for the given PR, ordered by `id` ascending.
+    pub fn list_comments(&self, pr_id: &str) -> Result<Vec<ReviewComment>, CacheError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, pr_id, file_path, start_line, end_line, body, created_at, status
+             FROM review_comments
+             WHERE pr_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![pr_id], |row| {
+            let status_str: String = row.get(7)?;
+            let status = if status_str == "submitted" {
+                CommentStatus::Submitted
+            } else {
+                CommentStatus::Draft
+            };
+            Ok(ReviewComment {
+                id: row.get(0)?,
+                pr_id: row.get(1)?,
+                file_path: row.get(2)?,
+                start_line: row.get(3)?,
+                end_line: row.get(4)?,
+                body: row.get(5)?,
+                created_at: row.get(6)?,
+                status,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(CacheError::from)
+    }
+
+    /// Replaces the `body` and `status` of an existing comment identified by `id`.
+    ///
+    /// Returns `Ok(true)` when a row was updated, `Ok(false)` when no row matched.
+    pub fn update_comment(
+        &self,
+        id: i64,
+        body: &str,
+        status: &CommentStatus,
+    ) -> Result<bool, CacheError> {
+        let status_str = match status {
+            CommentStatus::Draft => "draft",
+            CommentStatus::Submitted => "submitted",
+        };
+        let affected = self.conn.execute(
+            "UPDATE review_comments SET body = ?1, status = ?2 WHERE id = ?3",
+            params![body, status_str, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Deletes the comment with the given `id`.
+    ///
+    /// Returns `Ok(true)` when a row was deleted, `Ok(false)` when no row matched.
+    pub fn delete_comment(&self, id: i64) -> Result<bool, CacheError> {
+        let affected = self
+            .conn
+            .execute("DELETE FROM review_comments WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
+    // ── Category override CRUD ───────────────────────────────────────────────
+
+    /// Inserts or replaces a [`CategoryOverride`] for the given `(pr_id, file_path, hunk_id)`.
+    ///
+    /// If an override already exists for that hunk it is replaced (upsert semantics).
+    /// Returns the stored override with its database-assigned `id`.
+    pub fn set_override(
+        &self,
+        pr_id: &str,
+        file_path: &str,
+        hunk_id: &str,
+        change_type: Option<&str>,
+        attention_tags: Option<&[String]>,
+    ) -> Result<CategoryOverride, CacheError> {
+        let tags_json = attention_tags.map(serde_json::to_string).transpose()?;
+        self.conn.execute(
+            "INSERT INTO category_overrides
+                (pr_id, file_path, hunk_id, change_type, attention_tags)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(pr_id, file_path, hunk_id)
+             DO UPDATE SET change_type = excluded.change_type,
+                           attention_tags = excluded.attention_tags",
+            params![pr_id, file_path, hunk_id, change_type, tags_json],
+        )?;
+        // Fetch the just-upserted row to return the canonical id.
+        let mut stmt = self.conn.prepare(
+            "SELECT id, change_type, attention_tags
+             FROM category_overrides
+             WHERE pr_id = ?1 AND file_path = ?2 AND hunk_id = ?3",
+        )?;
+        let mut rows = stmt.query(params![pr_id, file_path, hunk_id])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+        let id: i64 = row.get(0)?;
+        let ct: Option<String> = row.get(1)?;
+        let tags_raw: Option<String> = row.get(2)?;
+        let tags: Option<Vec<String>> = tags_raw
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(CacheError::Serialization)?;
+        Ok(CategoryOverride {
+            id,
+            pr_id: pr_id.to_owned(),
+            file_path: file_path.to_owned(),
+            hunk_id: hunk_id.to_owned(),
+            change_type: ct,
+            attention_tags: tags,
+        })
+    }
+
+    /// Returns all [`CategoryOverride`]s for the given PR, ordered by `id` ascending.
+    pub fn get_overrides(&self, pr_id: &str) -> Result<Vec<CategoryOverride>, CacheError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, pr_id, file_path, hunk_id, change_type, attention_tags
+             FROM category_overrides
+             WHERE pr_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![pr_id], |row| {
+            let tags_raw: Option<String> = row.get(5)?;
+            // Deserialise attention_tags JSON inside the closure; map the error
+            // to a rusqlite::Error so query_map stays happy.
+            let attention_tags: Option<Vec<String>> = match tags_raw {
+                None => None,
+                Some(s) => Some(serde_json::from_str(&s).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?),
+            };
+            Ok(CategoryOverride {
+                id: row.get(0)?,
+                pr_id: row.get(1)?,
+                file_path: row.get(2)?,
+                hunk_id: row.get(3)?,
+                change_type: row.get(4)?,
+                attention_tags,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(CacheError::from)
+    }
+
+    /// Deletes the override for `(pr_id, file_path, hunk_id)`.
+    ///
+    /// Returns `Ok(true)` when a row was deleted, `Ok(false)` when no row matched.
+    pub fn delete_override(
+        &self,
+        pr_id: &str,
+        file_path: &str,
+        hunk_id: &str,
+    ) -> Result<bool, CacheError> {
+        let affected = self.conn.execute(
+            "DELETE FROM category_overrides
+             WHERE pr_id = ?1 AND file_path = ?2 AND hunk_id = ?3",
+            params![pr_id, file_path, hunk_id],
+        )?;
+        Ok(affected > 0)
     }
 
     /// Returns all file paths that have a cached Pass 2 result for the given key
@@ -684,5 +961,185 @@ mod tests {
         // verify
         let cached = cached.expect("expected a cache hit");
         assert_eq!(cached.summary, "Updated summary.");
+    }
+
+    // ── ReviewComment CRUD ────────────────────────────────────────────────────
+
+    fn sample_comment(pr_id: &str, file_path: &str) -> ReviewComment {
+        ReviewComment {
+            id: 0,
+            pr_id: pr_id.to_owned(),
+            file_path: file_path.to_owned(),
+            start_line: 10,
+            end_line: Some(15),
+            body: "Consider extracting this into a helper.".to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            status: CommentStatus::Draft,
+        }
+    }
+
+    #[test]
+    fn add_and_list_comments() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let c1 = sample_comment("42", "src/a.rs");
+        let c2 = ReviewComment {
+            start_line: 20,
+            body: "Second comment.".to_owned(),
+            ..sample_comment("42", "src/b.rs")
+        };
+        let c3 = ReviewComment {
+            start_line: 30,
+            body: "Third comment.".to_owned(),
+            ..sample_comment("42", "src/c.rs")
+        };
+
+        // execute
+        store.add_comment(&c1).unwrap();
+        store.add_comment(&c2).unwrap();
+        store.add_comment(&c3).unwrap();
+        let list = store.list_comments("42").unwrap();
+
+        // verify
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].file_path, "src/a.rs");
+        assert_eq!(list[1].file_path, "src/b.rs");
+        assert_eq!(list[2].file_path, "src/c.rs");
+        assert_eq!(list[0].status, CommentStatus::Draft);
+    }
+
+    #[test]
+    fn update_comment_body() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let saved = store
+            .add_comment(&sample_comment("42", "src/a.rs"))
+            .unwrap();
+
+        // execute
+        let updated = store.update_comment(saved.id, "New body.", &CommentStatus::Submitted);
+
+        // verify
+        assert!(updated.unwrap());
+        let list = store.list_comments("42").unwrap();
+        assert_eq!(list[0].body, "New body.");
+        assert_eq!(list[0].status, CommentStatus::Submitted);
+    }
+
+    #[test]
+    fn delete_comment() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let saved = store
+            .add_comment(&sample_comment("42", "src/a.rs"))
+            .unwrap();
+
+        // execute
+        let deleted = store.delete_comment(saved.id).unwrap();
+        let list = store.list_comments("42").unwrap();
+
+        // verify
+        assert!(deleted);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn comments_filtered_by_pr() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store
+            .add_comment(&sample_comment("42", "src/a.rs"))
+            .unwrap();
+        store
+            .add_comment(&sample_comment("99", "src/b.rs"))
+            .unwrap();
+
+        // execute
+        let pr42 = store.list_comments("42").unwrap();
+        let pr99 = store.list_comments("99").unwrap();
+
+        // verify
+        assert_eq!(pr42.len(), 1);
+        assert_eq!(pr42[0].pr_id, "42");
+        assert_eq!(pr99.len(), 1);
+        assert_eq!(pr99[0].pr_id, "99");
+    }
+
+    // ── CategoryOverride CRUD ─────────────────────────────────────────────────
+
+    #[test]
+    fn set_and_get_override() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let tags = vec!["security".to_owned(), "breaking-change".to_owned()];
+
+        // execute
+        store
+            .set_override(
+                "42",
+                "src/auth.rs",
+                "@@ -1,5 +1,10 @@",
+                Some("feature"),
+                Some(&tags),
+            )
+            .unwrap();
+        let overrides = store.get_overrides("42").unwrap();
+
+        // verify
+        assert_eq!(overrides.len(), 1);
+        let ov = &overrides[0];
+        assert_eq!(ov.pr_id, "42");
+        assert_eq!(ov.file_path, "src/auth.rs");
+        assert_eq!(ov.hunk_id, "@@ -1,5 +1,10 @@");
+        assert_eq!(ov.change_type.as_deref(), Some("feature"));
+        assert_eq!(ov.attention_tags.as_deref(), Some(tags.as_slice()));
+    }
+
+    #[test]
+    fn override_upserts() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let hunk = "@@ -1,5 +1,10 @@";
+        store
+            .set_override("42", "src/auth.rs", hunk, Some("refactor"), None)
+            .unwrap();
+
+        // execute — second call for same hunk with different values
+        store
+            .set_override(
+                "42",
+                "src/auth.rs",
+                hunk,
+                Some("feature"),
+                Some(&["security".to_owned()]),
+            )
+            .unwrap();
+        let overrides = store.get_overrides("42").unwrap();
+
+        // verify — second set wins; still only one row
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].change_type.as_deref(), Some("feature"));
+        assert_eq!(
+            overrides[0].attention_tags.as_deref(),
+            Some(["security".to_owned()].as_slice())
+        );
+    }
+
+    #[test]
+    fn delete_override() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        let hunk = "@@ -1,5 +1,10 @@";
+        store
+            .set_override("42", "src/auth.rs", hunk, Some("feature"), None)
+            .unwrap();
+
+        // execute
+        let deleted = store.delete_override("42", "src/auth.rs", hunk).unwrap();
+        let overrides = store.get_overrides("42").unwrap();
+
+        // verify
+        assert!(deleted);
+        assert!(overrides.is_empty());
     }
 }

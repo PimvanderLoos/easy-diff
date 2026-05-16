@@ -8,6 +8,8 @@ mod categories;
 mod config;
 mod diff;
 mod git;
+#[cfg(feature = "gui")]
+mod gui;
 mod llm;
 mod platform;
 mod tui;
@@ -21,6 +23,13 @@ use platform::{GithubOperations, Platform, PullRequest};
 #[derive(Parser)]
 #[command(name = "easy-diff", about = "LLM-powered PR review tool", version)]
 struct Cli {
+    /// Launch the graphical user interface.
+    ///
+    /// Only available when compiled with the `gui` feature.
+    #[cfg(feature = "gui")]
+    #[arg(long)]
+    gui: bool,
+
     /// Fetch and display the diff for a specific PR number.
     ///
     /// When omitted in an interactive terminal, a selection menu is shown.
@@ -62,6 +71,13 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    // Launch GUI when requested (only available with the `gui` feature).
+    #[cfg(feature = "gui")]
+    if cli.gui {
+        gui::run();
+        return Ok(());
+    }
 
     // 1. Detect repo
     let repo_info = git::detect_repo_info(".")

@@ -48,6 +48,8 @@ src-tauri/WixTools/
 .tauri/
 src-tauri/.tauri/
 rustc-ice-*.txt
+# Tauri-build generated ACL/capability schemas (build artifact)
+gen/
 
 # JavaScript / TypeScript dependencies
 node_modules/

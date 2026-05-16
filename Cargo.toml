@@ -26,6 +26,13 @@ dirs = "5"
 jsonschema = "0.46.5"
 dialoguer = "0.11"
 atty = "0.2"
+tauri = { version = "2.11.2", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+gui = ["dep:tauri", "dep:tauri-build"]

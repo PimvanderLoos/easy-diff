@@ -1,0 +1,27 @@
+{
+  "productName": "easy-diff",
+  "version": "0.1.0",
+  "identifier": "app.easydiff",
+  "build": {
+    "frontendDist": "frontend/dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "easy-diff",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}

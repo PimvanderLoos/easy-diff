@@ -131,6 +131,25 @@ pub fn filter_files(
         .collect()
 }
 
+/// Filters a list of [`DiffFile`]s to only those that have changes since they were last
+/// viewed.
+///
+/// `changes_since_viewed` maps file path → `true` when the file has new changes (or was
+/// never viewed). Files absent from the map are treated as having new changes (i.e. they
+/// are included in the output).
+pub fn filter_unreviewed<'a>(
+    files: &'a [DiffFile],
+    changes_since_viewed: &HashMap<String, bool>,
+) -> Vec<&'a DiffFile> {
+    files
+        .iter()
+        .filter(|f| {
+            // Absent from map → never viewed → treat as changed.
+            changes_since_viewed.get(&f.path).copied().unwrap_or(true)
+        })
+        .collect()
+}
+
 /// Renders filtered diff files as unified diff text with ANSI colour.
 ///
 /// - Added lines: green (`\x1b[32m`).
@@ -711,6 +730,102 @@ Binary files a/assets/logo.png and b/assets/logo.png differ
 
         // verify — file should be included due to matching tag
         assert_eq!(result.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // filter_unreviewed tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn filter_unreviewed_returns_only_changed() {
+        // setup — 3 files; one viewed at current head (not changed), two unreviewed
+        let files = vec![
+            make_diff_file("src/a.rs"),
+            make_diff_file("src/b.rs"),
+            make_diff_file("src/c.rs"),
+        ];
+        let mut changes = HashMap::new();
+        changes.insert("src/a.rs".into(), true); // has new changes
+        changes.insert("src/b.rs".into(), false); // viewed at current head
+        changes.insert("src/c.rs".into(), true); // has new changes
+
+        // execute
+        let result = filter_unreviewed(&files, &changes);
+
+        // verify — only a.rs and c.rs returned
+        assert_eq!(result.len(), 2);
+        let paths: Vec<&str> = result.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"src/a.rs"));
+        assert!(paths.contains(&"src/c.rs"));
+        assert!(!paths.contains(&"src/b.rs"));
+    }
+
+    #[test]
+    fn filter_unreviewed_empty_when_all_current() {
+        // setup — all files viewed at the current head
+        let files = vec![make_diff_file("src/a.rs"), make_diff_file("src/b.rs")];
+        let mut changes = HashMap::new();
+        changes.insert("src/a.rs".into(), false);
+        changes.insert("src/b.rs".into(), false);
+
+        // execute
+        let result = filter_unreviewed(&files, &changes);
+
+        // verify — nothing unreviewed
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_unreviewed_treats_absent_as_changed() {
+        // setup — file not in map at all (never viewed)
+        let files = vec![make_diff_file("src/new.rs")];
+        let changes: HashMap<String, bool> = HashMap::new();
+
+        // execute
+        let result = filter_unreviewed(&files, &changes);
+
+        // verify — file not in map → treated as changed → included
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, "src/new.rs");
+    }
+
+    #[test]
+    fn filter_combined_with_category() {
+        // setup — 3 files: a=changed+feature, b=not changed+feature, c=changed+docs
+        let files = vec![
+            make_diff_file("src/a.rs"),
+            make_diff_file("src/b.rs"),
+            make_diff_file("src/c.rs"),
+        ];
+        let mut analysis = HashMap::new();
+        analysis.insert(
+            "src/a.rs".into(),
+            make_pass2(vec![ChangeType::Feature], vec![]),
+        );
+        analysis.insert(
+            "src/b.rs".into(),
+            make_pass2(vec![ChangeType::Feature], vec![]),
+        );
+        analysis.insert(
+            "src/c.rs".into(),
+            make_pass2(vec![ChangeType::Docs], vec![]),
+        );
+
+        let mut changes = HashMap::new();
+        changes.insert("src/a.rs".into(), true); // unreviewed + feature
+        changes.insert("src/b.rs".into(), false); // reviewed + feature
+        changes.insert("src/c.rs".into(), true); // unreviewed + docs
+
+        // execute — first filter unreviewed, then filter by category (Feature only)
+        let unreviewed: Vec<DiffFile> = filter_unreviewed(&files, &changes)
+            .into_iter()
+            .cloned()
+            .collect();
+        let result = filter_files(&unreviewed, &analysis, &[ChangeType::Feature], &[]);
+
+        // verify — only src/a.rs matches both filters
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, "src/a.rs");
     }
 
     // -----------------------------------------------------------------------

@@ -88,6 +88,26 @@ pub fn display_summary(result: &Pass1Output) {
     println!();
 }
 
+/// Presents a confirm prompt asking whether to show only unreviewed files.
+///
+/// Only shown when the caller has viewed-state data (i.e. `has_viewed_data` is `true`).
+/// When `has_viewed_data` is `false`, returns `false` without prompting.
+///
+/// Returns an error when stdin is not a TTY or the prompt fails.
+pub fn select_unreviewed_filter(has_viewed_data: bool) -> Result<bool> {
+    if !has_viewed_data {
+        return Ok(false);
+    }
+
+    let show_only_unreviewed = Confirm::new()
+        .with_prompt("Show only files with changes since last review?")
+        .default(false)
+        .interact()
+        .map_err(|e| anyhow::anyhow!("unreviewed filter prompt failed: {e}"))?;
+
+    Ok(show_only_unreviewed)
+}
+
 /// Presents two `MultiSelect` prompts — one for [`ChangeType`] filters and one
 /// for [`AttentionTag`] filters — with all items selected by default.
 ///

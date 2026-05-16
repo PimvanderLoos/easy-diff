@@ -45,6 +45,14 @@ struct Cli {
     /// Stored in the cache database so future runs can highlight only new changes.
     #[arg(long)]
     mark_viewed: bool,
+
+    /// Show only files that have changes since they were last viewed.
+    ///
+    /// Requires that at least one file has been previously marked as viewed via
+    /// `--mark-viewed`. When combined with category filters, both filters apply
+    /// (intersection). When all files have been reviewed, prints a notice and exits.
+    #[arg(long)]
+    unreviewed: bool,
 }
 
 #[tokio::main]
@@ -174,23 +182,61 @@ async fn main() -> Result<()> {
         // as viewed after rendering when --mark-viewed is set.
         let displayed_files: Vec<String>;
 
+        // Determine whether any viewed-state data is available (cache must be open
+        // and the map must be non-empty to be useful).
+        let has_viewed_data = !result.has_changes_since_viewed.is_empty();
+
+        // Print a summary line when viewed data exists.
+        if has_viewed_data {
+            let unreviewed_count = result
+                .has_changes_since_viewed
+                .values()
+                .filter(|&&changed| changed)
+                .count();
+            let total = result.has_changes_since_viewed.len();
+            println!("[review] {unreviewed_count} of {total} files have changes since last review");
+        }
+
         if is_interactive {
             // Display human-readable summary, then run filter selection.
             tui::display_summary(&result.pass1);
 
+            // Ask whether to show only unreviewed files (only when viewed data exists).
+            let use_unreviewed = if cli.unreviewed {
+                true
+            } else {
+                tui::select_unreviewed_filter(has_viewed_data).unwrap_or(false)
+            };
+
             match tui::select_filters() {
                 Ok((change_types, attention_tags)) => {
-                    // Parse, filter, render, and print to stdout.
+                    // Parse the diff into structured files.
                     let parsed_files = diff::parse_diff(&diff.diff);
-                    let filtered = diff::filter_files(
-                        &parsed_files,
-                        &result.files,
-                        &change_types,
-                        &attention_tags,
-                    );
-                    displayed_files = filtered.iter().map(|f| f.path.clone()).collect();
-                    let rendered = diff::render_filtered_diff(&filtered, &result.files);
-                    print!("{rendered}");
+
+                    // Apply unreviewed filter first (when active), then category filters.
+                    let after_unreviewed: Vec<diff::DiffFile> = if use_unreviewed {
+                        diff::filter_unreviewed(&parsed_files, &result.has_changes_since_viewed)
+                            .into_iter()
+                            .cloned()
+                            .collect()
+                    } else {
+                        parsed_files
+                    };
+
+                    if use_unreviewed && after_unreviewed.is_empty() {
+                        println!("All files have been reviewed at the current revision.");
+                        displayed_files = Vec::new();
+                    } else {
+                        let filtered = diff::filter_files(
+                            &after_unreviewed,
+                            &result.files,
+                            &change_types,
+                            &attention_tags,
+                        );
+                        displayed_files = filtered.iter().map(|f| f.path.clone()).collect();
+                        let rendered = diff::render_filtered_diff(&filtered, &result.files);
+                        print!("{rendered}");
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "filter selection failed — printing unfiltered diff");
@@ -199,9 +245,28 @@ async fn main() -> Result<()> {
                 }
             }
         } else {
-            // Non-interactive: print JSON (original --analyze behaviour)
-            displayed_files = result.files.keys().cloned().collect();
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            // Non-interactive: apply --unreviewed filter before printing.
+            if cli.unreviewed {
+                let parsed_files = diff::parse_diff(&diff.diff);
+                let unreviewed: Vec<diff::DiffFile> =
+                    diff::filter_unreviewed(&parsed_files, &result.has_changes_since_viewed)
+                        .into_iter()
+                        .cloned()
+                        .collect();
+
+                if unreviewed.is_empty() {
+                    println!("All files have been reviewed at the current revision.");
+                    displayed_files = Vec::new();
+                } else {
+                    displayed_files = unreviewed.iter().map(|f| f.path.clone()).collect();
+                    let rendered = diff::render_filtered_diff(&unreviewed, &result.files);
+                    print!("{rendered}");
+                }
+            } else {
+                // Non-interactive without --unreviewed: print JSON (original --analyze behaviour)
+                displayed_files = result.files.keys().cloned().collect();
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
         }
 
         // Mark displayed files as viewed if the flag was set.

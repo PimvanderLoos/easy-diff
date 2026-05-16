@@ -124,6 +124,7 @@ impl GithubClient {
     /// The review may include an optional top-level `body` and a list of inline
     /// `comments`. The `event` determines the review verdict: Approve, Request Changes,
     /// or neutral Comment.
+    #[allow(dead_code)]
     pub async fn submit_review(
         &self,
         owner: &str,
@@ -273,6 +274,7 @@ async fn check_status(response: reqwest::Response) -> Result<reqwest::Response, 
 
 /// Request body for `POST /repos/{owner}/{repo}/pulls/{pr_number}/reviews`.
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct GithubReviewRequest {
     event: ReviewEvent,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -282,6 +284,7 @@ struct GithubReviewRequest {
 
 /// A single inline comment within a [`GithubReviewRequest`].
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct GithubReviewComment {
     path: String,
     line: u32,

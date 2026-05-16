@@ -77,6 +77,7 @@ pub struct PullRequestDiff {
 /// (`APPROVE`, `REQUEST_CHANGES`, `COMMENT`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)]
 pub enum ReviewEvent {
     /// Approve the pull request.
     Approve,
@@ -90,6 +91,7 @@ pub enum ReviewEvent {
 ///
 /// Used by [`GithubOperations::submit_review`] to post line-level feedback.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct ReviewCommentPayload {
     /// Repository-relative file path.
     pub path: String,
@@ -102,7 +104,7 @@ pub struct ReviewCommentPayload {
 /// Trait for GitHub operations (list PRs, get metadata, get diff, submit review).
 ///
 /// Implemented by both the REST API client and the `gh` CLI client.
-#[allow(async_fn_in_trait)]
+#[allow(async_fn_in_trait, dead_code)]
 pub trait GithubOperations {
     /// Lists open pull requests for the given repository.
     async fn list_open_pull_requests(

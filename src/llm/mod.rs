@@ -21,6 +21,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod debug;
 pub mod gemini;
 pub mod schema;
 
@@ -41,6 +42,9 @@ pub enum LlmError {
     #[error("I/O error communicating with LLM process: {0}")]
     Io(#[from] std::io::Error),
 }
+
+/// Maximum bytes of LLM output included in log messages (10KB).
+const MAX_LOG_LEN: usize = 10_240;
 
 /// Implemented by each CLI backend.
 ///
@@ -136,25 +140,32 @@ impl LlmDispatcher {
 
 /// Constructs an [`LlmDispatcher`] from resolved config.
 ///
-/// Model overrides are deferred to Epic 3 when per-provider model fields are
-/// added to [`crate::config::LlmConfig`].
+/// Per-provider settings (model, command) are read from the config sub-tables.
 pub fn create_dispatcher(config: &crate::config::Config) -> LlmDispatcher {
-    let default = provider_from_config(&config.llm.default_provider);
+    let default = provider_from_config(&config.llm.default_provider, &config.llm);
     let fallback = config
         .llm
         .fallback_provider
         .as_ref()
-        .map(provider_from_config);
+        .map(|p| provider_from_config(p, &config.llm));
     LlmDispatcher { default, fallback }
 }
 
-fn provider_from_config(provider: &crate::config::Provider) -> AnyProvider {
+fn provider_from_config(
+    provider: &crate::config::Provider,
+    llm: &crate::config::LlmConfig,
+) -> AnyProvider {
     match provider {
-        crate::config::Provider::Claude => AnyProvider::Claude(claude::ClaudeProvider::new(None)),
-        crate::config::Provider::Codex => AnyProvider::Codex(codex::CodexProvider::new(None)),
-        crate::config::Provider::Gemini => {
-            AnyProvider::Gemini(gemini::GeminiProvider::new(None, 3))
+        crate::config::Provider::Claude => {
+            AnyProvider::Claude(claude::ClaudeProvider::new(llm.claude.model.clone()))
         }
+        crate::config::Provider::Codex => {
+            AnyProvider::Codex(codex::CodexProvider::new(llm.codex.model.clone()))
+        }
+        crate::config::Provider::Gemini => AnyProvider::Gemini(gemini::GeminiProvider::new(
+            llm.gemini.model.clone(),
+            llm.max_retries,
+        )),
     }
 }
 
@@ -195,6 +206,17 @@ pub(crate) async fn run_subprocess(
         return Err(LlmError::EmptyOutput);
     }
 
+    if stdout.len() > MAX_LOG_LEN {
+        tracing::debug!(
+            program,
+            len = stdout.len(),
+            truncated = &stdout[..MAX_LOG_LEN],
+            "subprocess stdout (truncated)"
+        );
+    } else {
+        tracing::debug!(program, stdout = %stdout, "subprocess stdout");
+    }
+
     Ok(stdout)
 }
 
@@ -214,9 +236,22 @@ pub(crate) fn extract_json(text: &str) -> Result<serde_json::Value, LlmError> {
 
     let start = stripped.find(['{', '[']).unwrap_or(0);
 
-    serde_json::from_str(&stripped[start..]).map_err(|e| LlmError::InvalidJson {
-        message: e.to_string(),
-    })
+    let value: serde_json::Value =
+        serde_json::from_str(&stripped[start..]).map_err(|e| LlmError::InvalidJson {
+            message: e.to_string(),
+        })?;
+
+    let json_str = value.to_string();
+    if json_str.len() > MAX_LOG_LEN {
+        tracing::trace!(
+            len = json_str.len(),
+            "extracted JSON (truncated, >{MAX_LOG_LEN} bytes)"
+        );
+    } else {
+        tracing::trace!(json = %json_str, "extracted JSON");
+    }
+
+    Ok(value)
 }
 
 /// Validates `value` against `schema`.
@@ -364,10 +399,21 @@ mod tests {
 
     #[test]
     fn provider_from_config_maps_all_variants() {
-        // setup + execute
-        let claude = provider_from_config(&crate::config::Provider::Claude);
-        let codex = provider_from_config(&crate::config::Provider::Codex);
-        let gemini = provider_from_config(&crate::config::Provider::Gemini);
+        // setup
+        let llm = crate::config::LlmConfig {
+            default_provider: crate::config::Provider::Claude,
+            fallback_provider: None,
+            max_retries: 3,
+            timeout_seconds: 300,
+            claude: Default::default(),
+            codex: Default::default(),
+            gemini: Default::default(),
+        };
+
+        // execute
+        let claude = provider_from_config(&crate::config::Provider::Claude, &llm);
+        let codex = provider_from_config(&crate::config::Provider::Codex, &llm);
+        let gemini = provider_from_config(&crate::config::Provider::Gemini, &llm);
 
         // verify
         assert_eq!(claude.name(), "claude");

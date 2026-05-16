@@ -157,6 +157,7 @@ async fn main() -> Result<()> {
             config.preferences.max_file_context,
             cache,
             cli.refresh,
+            repo_info.root.clone(),
         );
         let result = engine
             .run(&diff.diff, &pr_ctx)

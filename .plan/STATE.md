@@ -148,6 +148,27 @@
   abstracts both clients. `RepoInfo` now includes `host` field for GHE
   support. 123 total tests pass (119 unit + 4 integration).
 
+- **Post-MVP: LLM config fix + debug output**: Fixed silent config fallback
+  and added failed-response debugging.
+  - **Config fix**: `RawLlmConfig` now has `#[serde(deny_unknown_fields)]` —
+    typos like `backend` instead of `default_provider` produce a clear parse
+    error. Added per-provider sub-tables (`[llm.claude]`, `[llm.gemini]`,
+    `[llm.codex]`) with `command` and `model` fields. `[llm.claude-code]`
+    accepted as alias. `max_retries` and `timeout_seconds` exposed.
+    `provider_from_config` now reads model from config sub-tables.
+  - **Debug dump**: New `src/llm/debug.rs` with `dump_failed_response()`.
+    On Pass 1/Pass 2 deserialization failure, the parsed JSON is written to
+    `.easy-diff/debug/<label>_<epoch>.txt` and the file path included in the
+    error message.
+  - **Trace logging**: `run_subprocess()` logs raw stdout at `debug` level;
+    `extract_json()` logs parsed JSON at `trace` level. Both truncate at 10KB.
+  - 129 total tests pass (125 unit + 4 integration).
+  - **Decisions**: `deny_unknown_fields` on `RawLlmConfig` only (not on
+    top-level `RawGlobalConfig`). `default_provider` kept as canonical name.
+  - **Concern**: User saw `missing field 'summary'` errors from Gemini on a
+    155k-token diff and from Claude on a 7k-token diff. The debug dump
+    feature will capture the actual response for diagnosis next time it occurs.
+
 ## In Progress
 (none)
 

@@ -1,7 +1,8 @@
 # Epic Agent Instructions
 
 You are implementing Epic {EPIC_NUMBER} ({EPIC_TITLE}) of the easy-diff project.
-You are a senior developer with a lot of experience writing good, clean Rust code.
+You are a senior developer experienced in Rust, and in Svelte + TypeScript when
+the epic involves frontend work.
 
 ## Setup
 
@@ -12,6 +13,15 @@ You are a senior developer with a lot of experience writing good, clean Rust cod
    - .plan/STATE.md
 
 2. Read all PR plan files in .plan/{EPIC_SLUG}/ in order (PR-0, PR-1, ...).
+
+3. Check if .plan/designs/ exists. If this epic involves frontend/GUI work,
+   read the design screenshots (PNG files) and source files (JSX/JS) before
+   implementing. The JSX files are React — use them as structural and behavioral
+   reference only; translate to idiomatic Svelte + Tailwind, not line-by-line
+   ports.
+
+4. Determine if this epic is backend-only or includes frontend work. This
+   affects which checks you run (see Step 1 below).
 
 ## Process
 
@@ -24,19 +34,34 @@ Spawn a sub-agent with the following instructions:
 ---
 Read CLAUDE.md, .plan/PLAN.md, .plan/STATE.md, and .plan/{EPIC_SLUG}/{PR_FILE}.
 
+If this PR involves frontend/GUI work, also read the design files in
+.plan/designs/ — the PNGs are the visual target, the JSX/JS files define
+component structure, design tokens, and data shapes. Translate to idiomatic
+Svelte + Tailwind; do not port React patterns (useState → Svelte reactivity,
+inline styles → Tailwind utilities, React.memo → Svelte's built-in reactivity).
+
 Implement this PR exactly as specified. Follow all conventions from CLAUDE.md.
 Stay within scope — do not implement anything listed in the PR's non-goals.
 
-After implementation:
-1. Run `cargo build` — must succeed
-2. Run `cargo test` — all tests must pass
-3. Run `cargo clippy -- -D warnings` — must pass
-4. Run `cargo fmt --check` — must pass
-5. Re-read the PR plan's success criteria and verify each is met. Report status
+After implementation, run all applicable checks:
+
+**Always (Rust):**
+1. `cargo build` — must succeed
+2. `cargo test` — all tests must pass
+3. `cargo clippy -- -D warnings` — must pass
+4. `cargo fmt --check` — must pass
+
+**If this PR includes frontend code (files in frontend/):**
+5. `cd frontend && npm install` (only if dependencies changed)
+6. `cd frontend && npm run build` — must succeed
+7. `cd frontend && npm run check` — TypeScript/Svelte checks must pass
+
+**Then verify:**
+8. Re-read the PR plan's success criteria and verify each is met. Report status
    of each criterion.
-6. Re-read the PR plan's non-goals and confirm none were implemented.
-7. List any concerns about your own implementation.
-8. If any open questions from the PR plan needed resolution, state your decision.
+9. Re-read the PR plan's non-goals and confirm none were implemented.
+10. List any concerns about your own implementation.
+11. If any open questions from the PR plan needed resolution, state your decision.
 
 If any check fails, fix the issue and re-run. If you cannot fix it after 3
 attempts, stop and report the failure clearly.

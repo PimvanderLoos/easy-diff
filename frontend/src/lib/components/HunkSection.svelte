@@ -22,7 +22,7 @@
    */
 
   import TagPill from "./TagPill.svelte";
-  import InlineDiff from "./InlineDiff.svelte";
+  import DiffView from "./DiffView.svelte";
   import type { HunkData, Classification, FilterState } from "../types.js";
 
   interface Props {
@@ -30,7 +30,7 @@
     hunk: HunkData;
     /** LLM classification for this hunk. */
     classification: Classification | null;
-    /** File path — forwarded to InlineDiff for syntax highlighting. */
+    /** File path — forwarded to DiffView for syntax highlighting. */
     filePath: string;
     /** Whether this is the first hunk in a file (suppresses the top border). */
     isFirst?: boolean;
@@ -42,6 +42,8 @@
     isDark: boolean;
     /** Active diff filter. */
     filter?: FilterState | null;
+    /** Diff view mode: inline (unified) or split (side-by-side). */
+    diffView?: "inline" | "split";
   }
 
   let {
@@ -53,6 +55,7 @@
     bodyHidden = false,
     isDark,
     filter = null,
+    diffView = "inline",
   }: Props = $props();
 
   /** Build "@@ L18-L35" label from the hunk's new-side line range. */
@@ -120,7 +123,8 @@
   <!-- Diff body -->
   {#if !bodyHidden}
     <div style="padding: 4px 0; background: var(--ed-bg);">
-      <InlineDiff
+      <DiffView
+        view={diffView}
         lines={hunk.lines}
         {filePath}
         {classification}

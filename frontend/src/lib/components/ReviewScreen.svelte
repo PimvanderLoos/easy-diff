@@ -18,7 +18,7 @@
 
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { selectedPr, filterState, reviewedFiles } from "../stores.js";
+  import { selectedPr, filterState, reviewedFiles, diffViewMode } from "../stores.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
   import FilePanel from "./FilePanel.svelte";
@@ -309,9 +309,9 @@
     if (activeFileIndex < files.length - 1) activeFileIndex++;
   }
 
-  // ── View mode ─────────────────────────────────────────────────────────────
+  // ── View mode (driven by the diffViewMode store) ──────────────────────────
 
-  let diffView = $state<"inline" | "split">("inline");
+  const diffView = $derived($diffViewMode);
 
   // ── Inspector toggle (stubbed for PR-3) ───────────────────────────────────
 
@@ -373,7 +373,7 @@
       fileIndex={activeFileIndex}
       totalFiles={files.length}
       {diffView}
-      onDiffViewChange={(v) => (diffView = v)}
+      onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
       onPrev={handlePrev}
       onNext={handleNext}
     />
@@ -409,6 +409,7 @@
             onToggleCollapsed={() => toggleCollapsed(file.path)}
             {isDark}
             {filter}
+            {diffView}
           />
         {/each}
       {:else}

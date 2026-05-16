@@ -25,6 +25,7 @@
 
   import LineStripe from "./LineStripe.svelte";
   import { highlight } from "../syntax.js";
+  import { lineTags, linePasses } from "../filters.js";
   import type { DiffLineData, Classification, FilterState } from "../types.js";
 
   interface Props {
@@ -42,27 +43,6 @@
 
   let { lines, filePath, classification, isDark, filter = null }: Props =
     $props();
-
-  /** Effective attention tags for a line: explicit overrides first, then hunk-level. */
-  function lineTags(line: DiffLineData): string[] {
-    if (line.tags && line.tags.length > 0) return line.tags;
-    return classification?.attentionTags ?? [];
-  }
-
-  /** Whether a line passes the active filter. Context lines always pass. */
-  function passes(line: DiffLineData): boolean {
-    if (!filter) return true;
-    if (line.type === "ctx") return true;
-    if (filter.changeType && filter.changeType !== "all") {
-      if ((classification?.changeType ?? "uncategorized") !== filter.changeType)
-        return false;
-    }
-    if (filter.attentionTags && filter.attentionTags.length > 0) {
-      const tags = lineTags(line);
-      if (!tags.some((t) => filter!.attentionTags.includes(t))) return false;
-    }
-    return true;
-  }
 
   function bg(line: DiffLineData): string {
     if (line.type === "add") return "var(--ed-added-bg)";
@@ -85,8 +65,8 @@
 
 <div style="font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7;">
   {#each lines as line, i (i)}
-    {@const tags = lineTags(line)}
-    {@const dim = !passes(line) && line.type !== "ctx"}
+    {@const tags = lineTags(line, classification)}
+    {@const dim = !linePasses(line, classification, filter) && line.type !== "ctx"}
     <div
       style="
         display: grid;

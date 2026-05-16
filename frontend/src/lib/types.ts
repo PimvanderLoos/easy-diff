@@ -278,6 +278,59 @@ export function edTagBg(
     : `oklch(0.96 0.05 ${tag.hue})`;
 }
 
+// ── Review comment types ───────────────────────────────────────────────────
+
+/**
+ * Status of a review comment: draft (local only) or submitted to the platform.
+ *
+ * Mirrors `src/cache/mod.rs` → `CommentStatus`.
+ */
+export type CommentStatus = "Draft" | "Submitted";
+
+/**
+ * An inline review comment on a specific line (or line range) within a file.
+ *
+ * Mirrors `src/cache/mod.rs` → `ReviewComment`.
+ */
+export interface ReviewComment {
+  /** Database-assigned primary key. 0 before the first save. */
+  id: number;
+  /** Platform-specific PR identifier (e.g. GitHub PR number as string). */
+  pr_id: string;
+  /** Relative path of the file being commented on. */
+  file_path: string;
+  /** First line of the commented range (1-based). */
+  start_line: number;
+  /** Last line of the commented range, or null for a single-line comment. */
+  end_line: number | null;
+  /** Markdown body of the comment. */
+  body: string;
+  /** ISO 8601 UTC timestamp when the comment was created locally. */
+  created_at: string;
+  /** Whether the comment has been submitted to the platform. */
+  status: CommentStatus;
+}
+
+/**
+ * A manual override of the LLM classification for a specific diff hunk.
+ *
+ * Mirrors `src/cache/mod.rs` → `CategoryOverride`.
+ */
+export interface CategoryOverride {
+  /** Database-assigned primary key. */
+  id: number;
+  /** Platform-specific PR identifier. */
+  pr_id: string;
+  /** Relative path of the file containing the hunk. */
+  file_path: string;
+  /** Identifier for the hunk being overridden (e.g. the `@@` header string). */
+  hunk_id: string;
+  /** User-supplied change type, overriding the LLM value. null = no override. */
+  change_type: string | null;
+  /** User-supplied attention tags, overriding the LLM value. null = no override. */
+  attention_tags: string[] | null;
+}
+
 /** Active LLM provider name. */
 export type Provider = "claude" | "codex" | "gemini";
 

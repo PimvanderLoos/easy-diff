@@ -8,8 +8,6 @@
    * Aggregates all attention tags across the file's hunks so the collapsed
    * row can display them without expanding.
    *
-   * Translates `BFilePanel` from `concept-b.jsx` to Svelte.
-   *
    * @example
    * ```svelte
    * <FilePanel
@@ -21,6 +19,8 @@
    *   onToggleReviewed={() => toggleReviewed(f.path)}
    *   onToggleCollapsed={() => toggleCollapsed(f.path)}
    *   isDark={true}
+   *   prId="42"
+   *   comments={draftCommentsForFile}
    * />
    * ```
    */
@@ -33,6 +33,7 @@
     HunkData,
     Classification,
     FilterState,
+    ReviewComment,
   } from "../types.js";
 
   interface Props {
@@ -60,6 +61,20 @@
     filter?: FilterState | null;
     /** Diff view mode: inline (unified) or split (side-by-side). */
     diffView?: "inline" | "split";
+    /** Platform-specific PR identifier for comment storage. */
+    prId?: string;
+    /** Draft comments for hunks in this file. */
+    comments?: ReviewComment[];
+    /** Emitted when a new comment is saved. */
+    onCommentAdded?: (comment: ReviewComment) => void;
+    /** Emitted when an existing comment is updated. */
+    onCommentUpdated?: (comment: ReviewComment) => void;
+    /** Emitted when a comment is deleted. */
+    onCommentDeleted?: (id: number) => void;
+    /** Emitted when the user overrides the change type from the context menu. */
+    onOverrideCategory?: (hunkId: string, changeType: string) => void;
+    /** Emitted when the user overrides attention tags from the context menu. */
+    onOverrideTags?: (hunkId: string, tags: string[]) => void;
   }
 
   let {
@@ -75,6 +90,13 @@
     isDark,
     filter = null,
     diffView = "inline",
+    prId = "",
+    comments = [],
+    onCommentAdded,
+    onCommentUpdated,
+    onCommentDeleted,
+    onOverrideCategory,
+    onOverrideTags,
   }: Props = $props();
 
   /**
@@ -91,6 +113,19 @@
     }
     return [...seen];
   });
+
+  /** Filter comments to those belonging to a specific hunk's line range. */
+  function commentsForHunk(hunk: HunkData): ReviewComment[] {
+    const minLine = hunk.newStart;
+    const maxLine =
+      hunk.newStart +
+      hunk.lines.filter((l) => l.type !== "del").length -
+      1;
+    return comments.filter((c) => {
+      const line = c.start_line;
+      return line >= minLine && line <= maxLine;
+    });
+  }
 </script>
 
 <div
@@ -125,6 +160,13 @@
         {isDark}
         {filter}
         {diffView}
+        {prId}
+        comments={commentsForHunk(hunk)}
+        {onCommentAdded}
+        {onCommentUpdated}
+        {onCommentDeleted}
+        onOverrideCategory={(ct) => onOverrideCategory?.(hunk.id, ct)}
+        onOverrideTags={(tags) => onOverrideTags?.(hunk.id, tags)}
       />
     {/each}
   {/if}

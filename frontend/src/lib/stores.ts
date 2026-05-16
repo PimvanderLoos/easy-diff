@@ -14,7 +14,12 @@
  */
 
 import { writable } from "svelte/store";
-import type { FilterState, PullRequest } from "./types.js";
+import type {
+  FilterState,
+  PullRequest,
+  ReviewComment,
+  CategoryOverride,
+} from "./types.js";
 
 /** The active top-level screen. */
 export type Screen = "selection" | "review";
@@ -67,3 +72,21 @@ export const focusedHunkId = writable<string | null>(null);
  * between InlineDiff and SplitDiff.
  */
 export const diffViewMode = writable<"inline" | "split">("inline");
+
+/**
+ * Draft review comments for the currently open PR.
+ *
+ * Loaded on review screen mount via `list_comments`. Updated optimistically
+ * as the user adds, edits, or deletes comments.
+ */
+export const draftComments = writable<ReviewComment[]>([]);
+
+/**
+ * Manual category overrides for the currently open PR, keyed by hunk id.
+ *
+ * Loaded on review screen mount via `get_category_overrides`. Updated
+ * optimistically when the user applies an override from the context menu.
+ */
+export const categoryOverrides = writable<Map<string, CategoryOverride>>(
+  new Map(),
+);

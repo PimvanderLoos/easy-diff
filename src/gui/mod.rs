@@ -15,7 +15,7 @@
 use serde::Serialize;
 
 use crate::analysis::{AnalysisEngine, AnalysisResult, PrContext};
-use crate::cache::{CacheKey, CacheStore};
+use crate::cache::{CacheKey, CacheStore, CategoryOverride, CommentStatus, ReviewComment};
 use crate::config::{self, Provider};
 use crate::diff::{parse_diff, DiffFile};
 use crate::git;
@@ -275,6 +275,115 @@ async fn get_pass1_summary(pr_number: u64) -> Result<Option<Pass1Output>, String
 }
 
 // ---------------------------------------------------------------------------
+// Review comment Tauri commands
+// ---------------------------------------------------------------------------
+
+/// Opens the SQLite cache at the canonical path for the current repository.
+///
+/// Returns an error string if the repository root cannot be detected or the
+/// database cannot be opened.
+fn open_cache() -> Result<CacheStore, String> {
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let db_path = repo_info
+        .root
+        .join(".easy-diff")
+        .join("cache")
+        .join("analysis.db");
+    CacheStore::open(&db_path).map_err(|e| e.to_string())
+}
+
+/// Adds a new draft review comment on a line (or line range) within a file.
+///
+/// Returns the persisted [`ReviewComment`] with its database-assigned `id`.
+#[tauri::command]
+fn add_comment(
+    pr_id: String,
+    file_path: String,
+    start_line: u32,
+    end_line: Option<u32>,
+    body: String,
+) -> Result<ReviewComment, String> {
+    let cache = open_cache()?;
+    let now = {
+        // Minimal ISO 8601 UTC timestamp without pulling in chrono.
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!("{}Z", secs)
+    };
+    let comment = ReviewComment {
+        id: 0,
+        pr_id,
+        file_path,
+        start_line,
+        end_line,
+        body,
+        created_at: now,
+        status: CommentStatus::Draft,
+    };
+    cache.add_comment(&comment).map_err(|e| e.to_string())
+}
+
+/// Returns all review comments for the given PR.
+#[tauri::command]
+fn list_comments(pr_id: String) -> Result<Vec<ReviewComment>, String> {
+    let cache = open_cache()?;
+    cache.list_comments(&pr_id).map_err(|e| e.to_string())
+}
+
+/// Updates the body of an existing comment (keeps status as Draft).
+#[tauri::command]
+fn update_comment(id: i64, body: String) -> Result<(), String> {
+    let cache = open_cache()?;
+    cache
+        .update_comment(id, &body, &CommentStatus::Draft)
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+}
+
+/// Deletes a comment by id.
+#[tauri::command]
+fn delete_comment(id: i64) -> Result<(), String> {
+    let cache = open_cache()?;
+    cache
+        .delete_comment(id)
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+}
+
+/// Sets (or replaces) a category override for a specific hunk.
+///
+/// Pass `change_type: null` / `attention_tags: null` to clear the respective override.
+#[tauri::command]
+fn set_category_override(
+    pr_id: String,
+    file_path: String,
+    hunk_id: String,
+    change_type: Option<String>,
+    attention_tags: Option<Vec<String>>,
+) -> Result<(), String> {
+    let cache = open_cache()?;
+    cache
+        .set_override(
+            &pr_id,
+            &file_path,
+            &hunk_id,
+            change_type.as_deref(),
+            attention_tags.as_deref(),
+        )
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+}
+
+/// Returns all category overrides for the given PR.
+#[tauri::command]
+fn get_category_overrides(pr_id: String) -> Result<Vec<CategoryOverride>, String> {
+    let cache = open_cache()?;
+    cache.get_overrides(&pr_id).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Application entry point
 // ---------------------------------------------------------------------------
 
@@ -295,6 +404,12 @@ pub fn run() {
             get_analysis,
             get_diff,
             get_pass1_summary,
+            add_comment,
+            list_comments,
+            update_comment,
+            delete_comment,
+            set_category_override,
+            get_category_overrides,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

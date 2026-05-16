@@ -86,6 +86,8 @@ pub struct AnalysisEngine {
     cache: Option<CacheStore>,
     /// When `true`, cache reads are skipped but results are still written.
     refresh: bool,
+    /// Repository root path for writing debug dumps on parse failure.
+    repo_root: std::path::PathBuf,
 }
 
 impl AnalysisEngine {
@@ -105,6 +107,7 @@ impl AnalysisEngine {
         max_file_context: u32,
         cache: Option<CacheStore>,
         refresh: bool,
+        repo_root: std::path::PathBuf,
     ) -> Self {
         Self {
             dispatcher,
@@ -113,6 +116,7 @@ impl AnalysisEngine {
             max_file_context,
             cache,
             refresh,
+            repo_root,
         }
     }
 
@@ -239,6 +243,7 @@ impl AnalysisEngine {
             let schema = pass2_schema.clone();
             let p1 = Arc::clone(&pass1_arc);
             let max_file_context = self.max_file_context;
+            let repo_root = self.repo_root.clone();
 
             join_set.spawn(async move {
                 let _permit = sem.acquire().await.expect("semaphore never closed");
@@ -263,8 +268,30 @@ impl AnalysisEngine {
                             .analyze(&prompt, &schema)
                             .await
                             .context("Pass 2 LLM call failed")?;
-                        let output = serde_json::from_value::<Pass2Output>(value)
-                            .context("failed to deserialize Pass 2 output")?;
+                        let output = match serde_json::from_value::<Pass2Output>(value.clone()) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let raw =
+                                    serde_json::to_string_pretty(&value).unwrap_or_default();
+                                let label =
+                                    format!("pass2_{}", file_path.replace('/', "_"));
+                                let dump_path = crate::llm::debug::dump_failed_response(
+                                    &repo_root, &label, &raw,
+                                );
+                                let ctx = if let Some(p) = dump_path {
+                                    format!(
+                                        "failed to deserialize Pass 2 output for {} (dumped to {p})",
+                                        file_path
+                                    )
+                                } else {
+                                    format!(
+                                        "failed to deserialize Pass 2 output for {}",
+                                        file_path
+                                    )
+                                };
+                                return Err(e).context(ctx);
+                            }
+                        };
                         outputs.push(output);
                     }
                     Ok(merge_pass2_outputs(outputs))
@@ -324,8 +351,20 @@ impl AnalysisEngine {
             .await
             .context("Pass 1 LLM call failed")?;
 
-        let pass1: Pass1Output =
-            serde_json::from_value(pass1_value).context("failed to deserialize Pass 1 output")?;
+        let pass1: Pass1Output = match serde_json::from_value(pass1_value.clone()) {
+            Ok(v) => v,
+            Err(e) => {
+                let raw = serde_json::to_string_pretty(&pass1_value).unwrap_or_default();
+                let dump_path =
+                    crate::llm::debug::dump_failed_response(&self.repo_root, "pass1", &raw);
+                let ctx = if let Some(p) = dump_path {
+                    format!("failed to deserialize Pass 1 output (dumped to {p})")
+                } else {
+                    "failed to deserialize Pass 1 output".to_string()
+                };
+                return Err(e).context(ctx);
+            }
+        };
 
         if let Some((store, key)) = cache {
             if let Err(e) = store.store_pass1(key, &pass1) {
@@ -894,6 +933,11 @@ mod tests {
             llm: LlmConfig {
                 default_provider: Provider::Claude,
                 fallback_provider: None,
+                max_retries: 3,
+                timeout_seconds: 300,
+                claude: Default::default(),
+                codex: Default::default(),
+                gemini: Default::default(),
             },
             preferences: Preferences {
                 context_lines: 5,
@@ -902,7 +946,15 @@ mod tests {
             },
         };
         let dispatcher = Arc::new(crate::llm::create_dispatcher(&config));
-        AnalysisEngine::new(dispatcher, 5000, 5, 1000, Some(cache), refresh)
+        AnalysisEngine::new(
+            dispatcher,
+            5000,
+            5,
+            1000,
+            Some(cache),
+            refresh,
+            std::path::PathBuf::from("/tmp/easy-diff-test"),
+        )
     }
 
     #[tokio::test]

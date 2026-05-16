@@ -68,6 +68,15 @@ pub struct BitbucketConfig {
     pub app_password: Option<String>,
 }
 
+/// Per-provider settings (command path, model override).
+#[derive(Debug, Clone, Default)]
+pub struct ProviderSettings {
+    /// Custom command name or path (e.g. `"gemini"` or `"/usr/local/bin/claude"`).
+    pub command: Option<String>,
+    /// Model override (e.g. `"gemini-3-pro-preview"`, `"sonnet"`).
+    pub model: Option<String>,
+}
+
 /// LLM provider settings.
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
@@ -75,6 +84,16 @@ pub struct LlmConfig {
     pub default_provider: Provider,
     /// Fallback provider when the primary is unavailable.
     pub fallback_provider: Option<Provider>,
+    /// Maximum retry attempts for schema validation (Gemini). Default: 3.
+    pub max_retries: u32,
+    /// Subprocess timeout in seconds. Default: 300.
+    pub timeout_seconds: u32,
+    /// Per-provider settings for Claude.
+    pub claude: ProviderSettings,
+    /// Per-provider settings for Codex.
+    pub codex: ProviderSettings,
+    /// Per-provider settings for Gemini.
+    pub gemini: ProviderSettings,
 }
 
 /// Available LLM provider backends.
@@ -155,9 +174,24 @@ struct RawBitbucketConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawLlmConfig {
     default_provider: Option<Provider>,
     fallback_provider: Option<Provider>,
+    max_retries: Option<u32>,
+    timeout_seconds: Option<u32>,
+    #[serde(alias = "claude-code")]
+    claude: Option<RawProviderConfig>,
+    codex: Option<RawProviderConfig>,
+    gemini: Option<RawProviderConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProviderConfig {
+    command: Option<String>,
+    profile: Option<String>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +208,8 @@ struct RawPreferencesConfig {
 const DEFAULT_CONTEXT_LINES: u32 = 5;
 const DEFAULT_MAX_FILE_CONTEXT: u32 = 500;
 const DEFAULT_LARGE_PR_THRESHOLD: u32 = 5000;
+const DEFAULT_MAX_RETRIES: u32 = 3;
+const DEFAULT_TIMEOUT_SECONDS: u32 = 300;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -277,6 +313,26 @@ fn merge(global: Option<RawGlobalConfig>, repo: Option<RawRepoConfig>) -> Config
         fallback_provider: repo_llm
             .and_then(|l| l.fallback_provider.clone())
             .or_else(|| global_llm.and_then(|l| l.fallback_provider.clone())),
+        max_retries: repo_llm
+            .and_then(|l| l.max_retries)
+            .or_else(|| global_llm.and_then(|l| l.max_retries))
+            .unwrap_or(DEFAULT_MAX_RETRIES),
+        timeout_seconds: repo_llm
+            .and_then(|l| l.timeout_seconds)
+            .or_else(|| global_llm.and_then(|l| l.timeout_seconds))
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS),
+        claude: merge_provider_config(
+            global_llm.and_then(|l| l.claude.as_ref()),
+            repo_llm.and_then(|l| l.claude.as_ref()),
+        ),
+        codex: merge_provider_config(
+            global_llm.and_then(|l| l.codex.as_ref()),
+            repo_llm.and_then(|l| l.codex.as_ref()),
+        ),
+        gemini: merge_provider_config(
+            global_llm.and_then(|l| l.gemini.as_ref()),
+            repo_llm.and_then(|l| l.gemini.as_ref()),
+        ),
     };
 
     let global_prefs = global.as_ref().and_then(|c| c.preferences.as_ref());
@@ -302,6 +358,20 @@ fn merge(global: Option<RawGlobalConfig>, repo: Option<RawRepoConfig>) -> Config
         bitbucket,
         llm,
         preferences,
+    }
+}
+
+fn merge_provider_config(
+    global: Option<&RawProviderConfig>,
+    repo: Option<&RawProviderConfig>,
+) -> ProviderSettings {
+    ProviderSettings {
+        command: repo
+            .and_then(|p| p.command.clone())
+            .or_else(|| global.and_then(|p| p.command.clone())),
+        model: repo
+            .and_then(|p| p.model.clone())
+            .or_else(|| global.and_then(|p| p.model.clone())),
     }
 }
 
@@ -554,6 +624,96 @@ mod tests {
         assert!(raw.github.as_ref().unwrap().backend.is_none());
         let config = merge(Some(raw), None);
         assert_eq!(config.github.backend, GithubBackend::Auto);
+    }
+
+    #[test]
+    fn unknown_llm_field_rejected() {
+        // setup
+        let toml = r#"
+            [llm]
+            backend = "gemini"
+        "#;
+
+        // execute
+        let result = toml::from_str::<RawGlobalConfig>(toml);
+
+        // verify
+        assert!(result.is_err(), "unknown field 'backend' should fail");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("unknown field"),
+            "error should say 'unknown field': {msg}"
+        );
+    }
+
+    #[test]
+    fn llm_provider_subtable_parsed() {
+        // setup
+        let toml = r#"
+            [llm]
+            default_provider = "gemini"
+
+            [llm.gemini]
+            command = "gemini"
+            model = "gemini-3-pro-preview"
+        "#;
+
+        // execute
+        let raw: RawGlobalConfig = toml::from_str(toml).expect("valid toml");
+
+        // verify
+        let llm = raw.llm.as_ref().unwrap();
+        assert_eq!(llm.default_provider, Some(Provider::Gemini));
+        let gemini = llm.gemini.as_ref().unwrap();
+        assert_eq!(gemini.command.as_deref(), Some("gemini"));
+        assert_eq!(gemini.model.as_deref(), Some("gemini-3-pro-preview"));
+    }
+
+    #[test]
+    fn llm_claude_code_alias_works() {
+        // setup
+        let toml = r#"
+            [llm]
+            default_provider = "claude"
+
+            [llm.claude-code]
+            command = "claude"
+            model = "sonnet"
+        "#;
+
+        // execute
+        let raw: RawGlobalConfig = toml::from_str(toml).expect("valid toml");
+
+        // verify
+        let llm = raw.llm.as_ref().unwrap();
+        let claude = llm.claude.as_ref().unwrap();
+        assert_eq!(claude.command.as_deref(), Some("claude"));
+        assert_eq!(claude.model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn llm_provider_settings_merged_into_config() {
+        // setup
+        let global: RawGlobalConfig = toml::from_str(
+            r#"
+            [llm]
+            default_provider = "gemini"
+            max_retries = 5
+
+            [llm.gemini]
+            model = "gemini-3-pro"
+        "#,
+        )
+        .unwrap();
+
+        // execute
+        let config = merge(Some(global), None);
+
+        // verify
+        assert_eq!(config.llm.default_provider, Provider::Gemini);
+        assert_eq!(config.llm.max_retries, 5);
+        assert_eq!(config.llm.gemini.model.as_deref(), Some("gemini-3-pro"));
+        assert!(config.llm.gemini.command.is_none());
     }
 
     #[test]

@@ -117,9 +117,68 @@ impl CacheStore {
                 result_json    TEXT    NOT NULL,
                 created_at     TEXT    NOT NULL,
                 PRIMARY KEY (pr_id, base_sha, head_sha, file_path, provider, schema_version)
+            );
+            CREATE TABLE IF NOT EXISTS viewed_files (
+                pr_id     TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                head_sha  TEXT NOT NULL,
+                viewed_at TEXT NOT NULL,
+                PRIMARY KEY (pr_id, file_path)
             );",
         )?;
         Ok(())
+    }
+
+    /// Records that `file_path` in PR `pr_id` was viewed at `head_sha`.
+    ///
+    /// Uses `INSERT OR REPLACE` so calling this twice for the same file
+    /// updates the stored SHA to the most recent value.
+    pub fn mark_viewed(
+        &self,
+        pr_id: &str,
+        file_path: &str,
+        head_sha: &str,
+    ) -> Result<(), CacheError> {
+        let now = chrono_now();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO viewed_files (pr_id, file_path, head_sha, viewed_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![pr_id, file_path, head_sha, now],
+        )?;
+        Ok(())
+    }
+
+    /// Returns the head SHA at which `file_path` in PR `pr_id` was last viewed,
+    /// or `None` if the file has never been marked as viewed.
+    pub fn get_viewed_sha(
+        &self,
+        pr_id: &str,
+        file_path: &str,
+    ) -> Result<Option<String>, CacheError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT head_sha FROM viewed_files WHERE pr_id = ?1 AND file_path = ?2")?;
+        let mut rows = stmt.query(params![pr_id, file_path])?;
+        match rows.next()? {
+            None => Ok(None),
+            Some(row) => {
+                let sha: String = row.get(0)?;
+                Ok(Some(sha))
+            }
+        }
+    }
+
+    /// Returns all `(file_path, head_sha)` pairs for files that have been
+    /// marked as viewed in PR `pr_id`.
+    pub fn list_viewed(&self, pr_id: &str) -> Result<Vec<(String, String)>, CacheError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, head_sha FROM viewed_files WHERE pr_id = ?1 ORDER BY file_path",
+        )?;
+        let rows = stmt.query_map(params![pr_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(CacheError::from)
     }
 
     /// Stores a Pass 1 result, replacing any existing entry with the same key.
@@ -548,6 +607,62 @@ mod tests {
 
         // verify
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn mark_and_retrieve_viewed() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute
+        store.mark_viewed("42", "src/auth.rs", "sha-abc").unwrap();
+        let sha = store.get_viewed_sha("42", "src/auth.rs").unwrap();
+
+        // verify
+        assert_eq!(sha, Some("sha-abc".to_owned()));
+    }
+
+    #[test]
+    fn mark_viewed_upserts() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store.mark_viewed("42", "src/auth.rs", "sha-old").unwrap();
+
+        // execute — mark same file again with a new SHA
+        store.mark_viewed("42", "src/auth.rs", "sha-new").unwrap();
+        let sha = store.get_viewed_sha("42", "src/auth.rs").unwrap();
+
+        // verify — second SHA wins
+        assert_eq!(sha, Some("sha-new".to_owned()));
+    }
+
+    #[test]
+    fn get_viewed_sha_returns_none_when_not_viewed() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute
+        let sha = store.get_viewed_sha("42", "src/never_viewed.rs").unwrap();
+
+        // verify
+        assert!(sha.is_none());
+    }
+
+    #[test]
+    fn list_viewed_returns_all_files_for_pr() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store.mark_viewed("42", "src/a.rs", "sha-a").unwrap();
+        store.mark_viewed("42", "src/b.rs", "sha-b").unwrap();
+        store.mark_viewed("99", "src/c.rs", "sha-c").unwrap(); // different PR
+
+        // execute
+        let viewed = store.list_viewed("42").unwrap();
+
+        // verify — only PR 42's files, sorted
+        assert_eq!(viewed.len(), 2);
+        assert_eq!(viewed[0], ("src/a.rs".to_owned(), "sha-a".to_owned()));
+        assert_eq!(viewed[1], ("src/b.rs".to_owned(), "sha-b".to_owned()));
     }
 
     #[test]

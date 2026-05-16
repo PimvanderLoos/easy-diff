@@ -44,6 +44,8 @@
     filter?: FilterState | null;
     /** Diff view mode: inline (unified) or split (side-by-side). */
     diffView?: "inline" | "split";
+    /** Called when the user clicks the hunk header to focus it in the inspector. */
+    onFocus?: () => void;
   }
 
   let {
@@ -56,6 +58,7 @@
     isDark,
     filter = null,
     diffView = "inline",
+    onFocus,
   }: Props = $props();
 
   /** Build "@@ L18-L35" label from the hunk's new-side line range. */
@@ -73,8 +76,14 @@
 </script>
 
 <div style="border-top: {isFirst ? 'none' : '1px solid var(--ed-border-subtle)'};">
-  <!-- Hunk header strip -->
+  <!-- Hunk header strip — click to focus in inspector -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
+    role="button"
+    tabindex="0"
+    onclick={onFocus}
+    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onFocus?.(); } }}
     style="
       padding: 8px 16px;
       background: {focused ? 'var(--ed-accent-soft)' : 'var(--ed-panel)'};
@@ -83,6 +92,8 @@
       align-items: center;
       gap: 12px;
       border-left: 2px solid {focused ? 'var(--ed-accent)' : 'transparent'};
+      cursor: pointer;
+      user-select: none;
     "
   >
     <span

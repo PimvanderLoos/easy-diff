@@ -52,6 +52,8 @@
     onToggleCollapsed?: () => void;
     /** Hunk id that is currently focused in the inspector (null = none). */
     focusedHunkId?: string | null;
+    /** Called when a hunk header is clicked to open the inspector. */
+    onFocusHunk?: (hunkId: string) => void;
     /** Whether the dark theme is active. */
     isDark: boolean;
     /** Active filter for dimming non-matching lines. */
@@ -69,6 +71,7 @@
     onToggleReviewed,
     onToggleCollapsed,
     focusedHunkId = null,
+    onFocusHunk,
     isDark,
     filter = null,
     diffView = "inline",
@@ -118,6 +121,7 @@
         filePath={file.path}
         isFirst={i === 0}
         focused={focusedHunkId === hunk.id}
+        onFocus={() => onFocusHunk?.(hunk.id)}
         {isDark}
         {filter}
         {diffView}

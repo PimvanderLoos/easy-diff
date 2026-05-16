@@ -18,10 +18,18 @@
 
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { selectedPr, filterState, reviewedFiles, diffViewMode } from "../stores.js";
+  import {
+    selectedPr,
+    filterState,
+    reviewedFiles,
+    collapsedFiles,
+    focusedHunkId,
+    diffViewMode,
+  } from "../stores.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
   import FilePanel from "./FilePanel.svelte";
+  import InspectorPanel from "./InspectorPanel.svelte";
   import type {
     AnalysisResult,
     FileEntry,
@@ -261,8 +269,7 @@
   // ── Review tracking ───────────────────────────────────────────────────────
 
   const reviewedSet = $derived($reviewedFiles);
-
-  let collapsedSet = $state<Set<string>>(new Set());
+  const collapsedSet = $derived($collapsedFiles);
 
   function toggleReviewed(path: string) {
     reviewedFiles.update((prev) => {
@@ -271,26 +278,30 @@
       if (willBeReviewed) {
         next.add(path);
         // Auto-collapse when marked reviewed.
-        collapsedSet = new Set([...collapsedSet, path]);
+        collapsedFiles.update((cs) => new Set([...cs, path]));
       } else {
         next.delete(path);
         // Re-expand when un-reviewed.
-        const cs = new Set(collapsedSet);
-        cs.delete(path);
-        collapsedSet = cs;
+        collapsedFiles.update((cs) => {
+          const ncs = new Set(cs);
+          ncs.delete(path);
+          return ncs;
+        });
       }
       return next;
     });
   }
 
   function toggleCollapsed(path: string) {
-    const next = new Set(collapsedSet);
-    if (next.has(path)) {
-      next.delete(path);
-    } else {
-      next.add(path);
-    }
-    collapsedSet = next;
+    collapsedFiles.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
   }
 
   // ── File navigation ───────────────────────────────────────────────────────
@@ -313,9 +324,42 @@
 
   const diffView = $derived($diffViewMode);
 
-  // ── Inspector toggle (stubbed for PR-3) ───────────────────────────────────
+  // ── Inspector (driven by focusedHunkId store) ─────────────────────────────
 
-  const inspectorOpen = $state(false);
+  const currentFocusedHunkId = $derived($focusedHunkId);
+  const inspectorOpen = $derived(currentFocusedHunkId !== null);
+
+  /** The file that owns the focused hunk (null when inspector is closed). */
+  const focusedFile = $derived.by<FileEntry | null>(() => {
+    if (!currentFocusedHunkId) return null;
+    // Hunk ids are "{filePath}:{index}" — extract the file path prefix.
+    const colonIdx = currentFocusedHunkId.lastIndexOf(":");
+    const filePath = colonIdx >= 0
+      ? currentFocusedHunkId.slice(0, colonIdx)
+      : currentFocusedHunkId;
+    return files.find((f) => f.path === filePath) ?? null;
+  });
+
+  /** The focused hunk itself (null when inspector is closed). */
+  const focusedHunk = $derived.by<HunkData | null>(() => {
+    if (!currentFocusedHunkId || !focusedFile) return null;
+    return (hunks[focusedFile.path] ?? []).find(
+      (h) => h.id === currentFocusedHunkId,
+    ) ?? null;
+  });
+
+  /** Classification for the focused hunk (null when inspector is closed). */
+  const focusedClassification = $derived<Classification | null>(
+    currentFocusedHunkId ? (classifications[currentFocusedHunkId] ?? null) : null,
+  );
+
+  function handleFocusHunk(hunkId: string) {
+    focusedHunkId.set(hunkId);
+  }
+
+  function handleCloseInspector() {
+    focusedHunkId.set(null);
+  }
 
   // ── Theme detection ───────────────────────────────────────────────────────
 
@@ -405,8 +449,10 @@
             classifications={classifications}
             reviewed={reviewedSet.has(file.path)}
             collapsed={collapsedSet.has(file.path)}
+            focusedHunkId={currentFocusedHunkId}
             onToggleReviewed={() => toggleReviewed(file.path)}
             onToggleCollapsed={() => toggleCollapsed(file.path)}
+            onFocusHunk={handleFocusHunk}
             {isDark}
             {filter}
             {diffView}
@@ -423,18 +469,15 @@
     </div>
   </div>
 
-  <!-- Inspector panel (stub — rendered in PR-3) -->
-  {#if inspectorOpen}
-    <div
-      class="overflow-auto"
-      style="background: var(--ed-bg);"
-    >
-      <div
-        class="px-5 py-3.5 text-ed-text"
-        style="font-size: 14px; font-weight: 600;"
-      >
-        Inspector
-      </div>
-    </div>
+  <!-- Inspector panel -->
+  {#if inspectorOpen && focusedFile && focusedHunk}
+    <InspectorPanel
+      file={focusedFile}
+      hunk={focusedHunk}
+      classification={focusedClassification}
+      {isDark}
+      onClose={handleCloseInspector}
+      onMarkReviewed={() => toggleReviewed(focusedFile!.path)}
+    />
   {/if}
 </div>

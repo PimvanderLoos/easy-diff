@@ -39,6 +39,12 @@ struct Cli {
     /// New results are still written to the cache. Requires `--analyze`.
     #[arg(long, requires = "analyze")]
     refresh: bool,
+
+    /// Mark all displayed files as viewed at the current head SHA after rendering.
+    ///
+    /// Stored in the cache database so future runs can highlight only new changes.
+    #[arg(long)]
+    mark_viewed: bool,
 }
 
 #[tokio::main]
@@ -164,6 +170,10 @@ async fn main() -> Result<()> {
             .await
             .context("analysis failed")?;
 
+        // Collect the paths of files that will be displayed so we can mark them
+        // as viewed after rendering when --mark-viewed is set.
+        let displayed_files: Vec<String>;
+
         if is_interactive {
             // Display human-readable summary, then run filter selection.
             tui::display_summary(&result.pass1);
@@ -178,17 +188,38 @@ async fn main() -> Result<()> {
                         &change_types,
                         &attention_tags,
                     );
+                    displayed_files = filtered.iter().map(|f| f.path.clone()).collect();
                     let rendered = diff::render_filtered_diff(&filtered, &result.files);
                     print!("{rendered}");
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "filter selection failed — printing unfiltered diff");
+                    displayed_files = result.files.keys().cloned().collect();
                     print!("{}", diff.diff);
                 }
             }
         } else {
             // Non-interactive: print JSON (original --analyze behaviour)
+            displayed_files = result.files.keys().cloned().collect();
             println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+
+        // Mark displayed files as viewed if the flag was set.
+        if cli.mark_viewed {
+            match CacheStore::open(&cache_path) {
+                Ok(mark_cache) => {
+                    let pr_id = pr_number.to_string();
+                    for path in &displayed_files {
+                        if let Err(e) = mark_cache.mark_viewed(&pr_id, path, &pr_meta.head_sha) {
+                            tracing::warn!(file = %path, error = %e, "failed to mark file as viewed");
+                        }
+                    }
+                    tracing::info!(count = displayed_files.len(), "files marked as viewed");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "could not open cache to mark files as viewed");
+                }
+            }
         }
     } else {
         // No analysis requested in non-interactive mode: print raw diff

@@ -63,6 +63,13 @@ pub struct AnalysisResult {
     pub pass1: Pass1Output,
     /// Per-file analysis produced by Pass 2, keyed by file path.
     pub files: HashMap<String, Pass2Output>,
+    /// Whether each file has changes since the user last viewed it.
+    ///
+    /// `true` means the file has new changes (or was never viewed).
+    /// `false` means the file was last viewed at the current head SHA.
+    ///
+    /// Only populated when a [`CacheStore`] is available; empty otherwise.
+    pub has_changes_since_viewed: HashMap<String, bool>,
 }
 
 /// Internal state for incremental re-analysis.
@@ -439,7 +446,40 @@ impl AnalysisEngine {
 
         tracing::info!(successful = files.len(), "Pass 2 complete");
 
-        Ok(AnalysisResult { pass1, files })
+        // ── Viewed-file detection ───────────────────────────────────────────
+        // For each analysed file, compare the head SHA stored in `viewed_files`
+        // against the current `ctx.head_sha`. A mismatch (or no record) means
+        // the file has unseen changes.
+        let has_changes_since_viewed: HashMap<String, bool> =
+            if let Some(cache) = self.cache.as_ref() {
+                let pr_id = ctx.pr_number.to_string();
+                files
+                    .keys()
+                    .map(|path| {
+                        let changed = match cache.get_viewed_sha(&pr_id, path) {
+                            Ok(Some(viewed_sha)) => viewed_sha != ctx.head_sha,
+                            Ok(None) => true, // never viewed → treat as changed
+                            Err(e) => {
+                                tracing::warn!(
+                                    file = %path,
+                                    error = %e,
+                                    "failed to read viewed SHA — treating as changed"
+                                );
+                                true
+                            }
+                        };
+                        (path.clone(), changed)
+                    })
+                    .collect()
+            } else {
+                HashMap::new()
+            };
+
+        Ok(AnalysisResult {
+            pass1,
+            files,
+            has_changes_since_viewed,
+        })
     }
 
     /// Calls the LLM for Pass 1 and optionally writes the result to cache.
@@ -1216,6 +1256,101 @@ mod tests {
         assert_eq!(cached_files, vec!["src/a.rs".to_string()]);
         // src/b.rs is absent — the engine must call LLM for it (not testable without LLM)
         assert!(!cached_files.contains(&"src/b.rs".to_string()));
+    }
+
+    // ── has_changes_since_viewed tests ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn changes_since_viewed_detects_update() {
+        // setup — file was viewed at SHA-A; current head is SHA-B
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+        let p1 = sample_pass1_output();
+        cache.store_pass1(&key, &p1).unwrap();
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("a"))
+            .unwrap();
+        cache
+            .store_pass2(&key, "src/b.rs", &sample_pass2_output("b"))
+            .unwrap();
+
+        // Mark src/a.rs as viewed at the *current* head (no changes).
+        cache.mark_viewed("42", "src/a.rs", "bbbbbb").unwrap();
+        // src/b.rs was viewed at a different SHA → has changes.
+        cache.mark_viewed("42", "src/b.rs", "old-sha").unwrap();
+
+        let engine = make_engine(cache, false);
+        let ctx = sample_ctx(); // head_sha = "bbbbbb"
+
+        // execute
+        let result = engine.run(two_file_diff(), &ctx).await.unwrap();
+
+        // verify
+        assert_eq!(
+            result.has_changes_since_viewed.get("src/a.rs"),
+            Some(&false)
+        );
+        assert_eq!(result.has_changes_since_viewed.get("src/b.rs"), Some(&true));
+    }
+
+    #[tokio::test]
+    async fn no_changes_when_viewed_at_current_sha() {
+        // setup — file viewed at the same SHA as current head
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+        let p1 = sample_pass1_output();
+        cache.store_pass1(&key, &p1).unwrap();
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("a"))
+            .unwrap();
+        cache
+            .store_pass2(&key, "src/b.rs", &sample_pass2_output("b"))
+            .unwrap();
+
+        // Both files viewed at the current head SHA.
+        cache.mark_viewed("42", "src/a.rs", "bbbbbb").unwrap();
+        cache.mark_viewed("42", "src/b.rs", "bbbbbb").unwrap();
+
+        let engine = make_engine(cache, false);
+        let ctx = sample_ctx();
+
+        // execute
+        let result = engine.run(two_file_diff(), &ctx).await.unwrap();
+
+        // verify — neither file has new changes
+        assert_eq!(
+            result.has_changes_since_viewed.get("src/a.rs"),
+            Some(&false)
+        );
+        assert_eq!(
+            result.has_changes_since_viewed.get("src/b.rs"),
+            Some(&false)
+        );
+    }
+
+    #[tokio::test]
+    async fn never_viewed_shows_changes() {
+        // setup — no viewed records at all
+        let cache = CacheStore::open_in_memory().unwrap();
+        let key = sample_cache_key("claude");
+        let p1 = sample_pass1_output();
+        cache.store_pass1(&key, &p1).unwrap();
+        cache
+            .store_pass2(&key, "src/a.rs", &sample_pass2_output("a"))
+            .unwrap();
+        cache
+            .store_pass2(&key, "src/b.rs", &sample_pass2_output("b"))
+            .unwrap();
+
+        let engine = make_engine(cache, false);
+        let ctx = sample_ctx();
+
+        // execute
+        let result = engine.run(two_file_diff(), &ctx).await.unwrap();
+
+        // verify — all files show as changed when never viewed
+        assert_eq!(result.has_changes_since_viewed.get("src/a.rs"), Some(&true));
+        assert_eq!(result.has_changes_since_viewed.get("src/b.rs"), Some(&true));
     }
 
     #[tokio::test]

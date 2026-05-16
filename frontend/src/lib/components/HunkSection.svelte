@@ -7,8 +7,6 @@
    * stub when the diff is hidden). When `focused` is true, the header gets an
    * accent left-border and soft background — used by the inspector panel.
    *
-   * Translates `BHunkSection` from `concept-b.jsx` to Svelte.
-   *
    * @example
    * ```svelte
    * <HunkSection
@@ -17,13 +15,20 @@
    *   filePath="src/Foo.java"
    *   isFirst={i === 0}
    *   isDark={true}
+   *   prId="42"
+   *   comments={draftsForHunk}
    * />
    * ```
    */
 
   import TagPill from "./TagPill.svelte";
   import DiffView from "./DiffView.svelte";
-  import type { HunkData, Classification, FilterState } from "../types.js";
+  import type {
+    HunkData,
+    Classification,
+    FilterState,
+    ReviewComment,
+  } from "../types.js";
 
   interface Props {
     /** The hunk to render. */
@@ -44,6 +49,20 @@
     filter?: FilterState | null;
     /** Diff view mode: inline (unified) or split (side-by-side). */
     diffView?: "inline" | "split";
+    /** Platform-specific PR identifier for comment storage. */
+    prId?: string;
+    /** Draft comments that overlap this hunk. */
+    comments?: ReviewComment[];
+    /** Emitted when a new comment is saved. */
+    onCommentAdded?: (comment: ReviewComment) => void;
+    /** Emitted when an existing comment is updated. */
+    onCommentUpdated?: (comment: ReviewComment) => void;
+    /** Emitted when a comment is deleted. */
+    onCommentDeleted?: (id: number) => void;
+    /** Emitted when the user overrides the change type from the context menu. */
+    onOverrideCategory?: (changeType: string) => void;
+    /** Emitted when the user overrides attention tags from the context menu. */
+    onOverrideTags?: (tags: string[]) => void;
     /** Called when the user clicks the hunk header to focus it in the inspector. */
     onFocus?: () => void;
   }
@@ -58,6 +77,13 @@
     isDark,
     filter = null,
     diffView = "inline",
+    prId = "",
+    comments = [],
+    onCommentAdded,
+    onCommentUpdated,
+    onCommentDeleted,
+    onOverrideCategory,
+    onOverrideTags,
     onFocus,
   }: Props = $props();
 
@@ -138,9 +164,17 @@
         view={diffView}
         lines={hunk.lines}
         {filePath}
+        hunkId={hunk.id}
         {classification}
         {isDark}
         {filter}
+        {prId}
+        {comments}
+        {onCommentAdded}
+        {onCommentUpdated}
+        {onCommentDeleted}
+        {onOverrideCategory}
+        {onOverrideTags}
       />
     </div>
   {/if}

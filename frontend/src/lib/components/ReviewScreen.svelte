@@ -25,6 +25,8 @@
     collapsedFiles,
     focusedHunkId,
     diffViewMode,
+    draftComments,
+    categoryOverrides,
   } from "../stores.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
@@ -37,6 +39,8 @@
     HunkData,
     DiffLineData,
     Classification,
+    ReviewComment,
+    CategoryOverride,
   } from "../types.js";
 
   // ── PR data (from parent store) ───────────────────────────────────────────
@@ -80,6 +84,14 @@
 
   let rawDiff = $state<RawDiffFile[]>([]);
 
+  // ── Comment and override state ────────────────────────────────────────────
+
+  /** Local reactive snapshot of the draftComments store. */
+  const comments = $derived($draftComments);
+
+  /** Local reactive snapshot of the categoryOverrides store. */
+  const overrides = $derived($categoryOverrides);
+
   onMount(async () => {
     if (!pr) return;
 
@@ -115,6 +127,25 @@
       });
     } catch {
       // Diff unavailable — file panels will show empty hunks.
+    }
+
+    // Load draft comments and category overrides from the local cache.
+    const prId = String(pr.number);
+    try {
+      const loaded = await invoke<ReviewComment[]>("list_comments", { prId });
+      draftComments.set(loaded);
+    } catch {
+      // No comments yet; ignore.
+    }
+    try {
+      const loaded = await invoke<CategoryOverride[]>("get_category_overrides", {
+        prId,
+      });
+      categoryOverrides.set(
+        new Map(loaded.map((ov) => [ov.hunk_id, ov])),
+      );
+    } catch {
+      // No overrides yet; ignore.
     }
   });
 
@@ -231,7 +262,8 @@
   });
 
   /**
-   * Build a stub classification from Pass2 data for each hunk.
+   * Build a stub classification from Pass2 data for each hunk, then apply any
+   * manual category overrides from the `categoryOverrides` store.
    *
    * Real per-hunk classification (Pass 2) uses hunk ids. Since the backend
    * doesn't yet expose per-hunk ids in the analysis result, we fall back to
@@ -252,7 +284,16 @@
       };
       const fileHunks = buildHunks(rf);
       for (const h of fileHunks) {
-        map[h.id] = cls;
+        const ov = overrides.get(h.id);
+        if (ov) {
+          map[h.id] = {
+            ...cls,
+            changeType: ov.change_type ?? cls.changeType,
+            attentionTags: ov.attention_tags ?? cls.attentionTags,
+          };
+        } else {
+          map[h.id] = cls;
+        }
       }
     }
     return map;
@@ -302,6 +343,85 @@
       }
       return next;
     });
+  }
+
+  // ── Comment handlers ─────────────────────────────────────────────────────
+
+  function handleCommentAdded(comment: ReviewComment) {
+    draftComments.update((prev) => [...prev, comment]);
+  }
+
+  function handleCommentUpdated(comment: ReviewComment) {
+    draftComments.update((prev) =>
+      prev.map((c) => (c.id === comment.id ? comment : c)),
+    );
+  }
+
+  function handleCommentDeleted(id: number) {
+    draftComments.update((prev) => prev.filter((c) => c.id !== id));
+  }
+
+  async function handleOverrideCategory(hunkId: string, changeType: string) {
+    if (!pr) return;
+    const prId = String(pr.number);
+    // Extract file path from hunk id ("{filePath}:{index}").
+    const colonIdx = hunkId.lastIndexOf(":");
+    const filePath = colonIdx >= 0 ? hunkId.slice(0, colonIdx) : hunkId;
+    try {
+      await invoke("set_category_override", {
+        prId,
+        filePath,
+        hunkId,
+        changeType,
+        attentionTags: null,
+      });
+      categoryOverrides.update((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(hunkId);
+        next.set(hunkId, {
+          id: existing?.id ?? 0,
+          pr_id: prId,
+          file_path: filePath,
+          hunk_id: hunkId,
+          change_type: changeType,
+          attention_tags: existing?.attention_tags ?? null,
+        });
+        return next;
+      });
+    } catch {
+      // Override failed silently; UI retains previous state.
+    }
+  }
+
+  async function handleOverrideTags(hunkId: string, tags: string[]) {
+    if (!pr) return;
+    const prId = String(pr.number);
+    const colonIdx = hunkId.lastIndexOf(":");
+    const filePath = colonIdx >= 0 ? hunkId.slice(0, colonIdx) : hunkId;
+    try {
+      await invoke("set_category_override", {
+        prId,
+        filePath,
+        hunkId,
+        changeType: null,
+        attentionTags: tags,
+      });
+      categoryOverrides.update((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(hunkId);
+        next.set(hunkId, {
+          id: existing?.id ?? 0,
+          pr_id: prId,
+          file_path: filePath,
+          hunk_id: hunkId,
+          change_type: existing?.change_type ?? null,
+          attention_tags: tags,
+        });
+        return next;
+      });
+    } catch {
+      // Override failed silently; UI retains previous state.
+    }
   }
 
   // ── File navigation ───────────────────────────────────────────────────────
@@ -456,6 +576,13 @@
             {isDark}
             {filter}
             {diffView}
+            prId={pr ? String(pr.number) : ""}
+            comments={comments.filter((c) => c.file_path === file.path)}
+            onCommentAdded={handleCommentAdded}
+            onCommentUpdated={handleCommentUpdated}
+            onCommentDeleted={handleCommentDeleted}
+            onOverrideCategory={handleOverrideCategory}
+            onOverrideTags={handleOverrideTags}
           />
         {/each}
       {:else}

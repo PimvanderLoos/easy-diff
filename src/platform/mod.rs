@@ -145,6 +145,35 @@ pub trait GithubOperations {
     ) -> Result<(), PlatformError>;
 }
 
+/// Trait for BitBucket Cloud operations (list PRs, get metadata, get diff).
+///
+/// Implemented by [`bitbucket::BitbucketClient`].
+#[allow(async_fn_in_trait, dead_code)]
+pub trait BitbucketOperations {
+    /// Lists open pull requests for the given repository.
+    async fn list_open_pull_requests(
+        &self,
+        workspace: &str,
+        repo_slug: &str,
+    ) -> Result<Vec<PullRequest>, PlatformError>;
+
+    /// Fetches metadata for a specific pull request.
+    async fn get_pull_request(
+        &self,
+        workspace: &str,
+        repo_slug: &str,
+        pr_id: u64,
+    ) -> Result<PullRequest, PlatformError>;
+
+    /// Fetches the unified diff for a specific pull request.
+    async fn get_pull_request_diff(
+        &self,
+        workspace: &str,
+        repo_slug: &str,
+        pr_id: u64,
+    ) -> Result<PullRequestDiff, PlatformError>;
+}
+
 /// Errors from platform API calls.
 #[derive(Debug, thiserror::Error)]
 pub enum PlatformError {

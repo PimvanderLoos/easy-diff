@@ -14,8 +14,12 @@
 
 use serde::Serialize;
 
+use crate::analysis::{AnalysisEngine, AnalysisResult, PrContext};
+use crate::cache::{CacheKey, CacheStore};
 use crate::config::{self, Provider};
+use crate::diff::{parse_diff, DiffFile};
 use crate::git;
+use crate::llm::schema::Pass1Output;
 use crate::platform::github_provider;
 use crate::platform::{GithubOperations, PullRequest};
 
@@ -49,7 +53,9 @@ pub struct GuiConfig {
 async fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
     let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
     let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
-    let client = github_provider::create_github_provider(&config.github);
+    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
     client
         .list_open_pull_requests(&repo_info.owner, &repo_info.repo)
         .await
@@ -77,6 +83,197 @@ async fn get_config() -> Result<GuiConfig, String> {
     })
 }
 
+/// Runs the two-pass analysis for the given PR and returns the combined result.
+///
+/// Fetches the diff via the platform API, then runs the two-pass LLM analysis
+/// engine. Because [`AnalysisEngine`] is `!Send` (it wraps `rusqlite::Connection`
+/// which uses `RefCell`), the engine is constructed and driven on a dedicated
+/// single-threaded tokio runtime inside [`tokio::task::spawn_blocking`]. The
+/// result is sent back to the caller via a one-shot channel.
+#[tauri::command]
+async fn run_analysis(pr_number: u64) -> Result<AnalysisResult, String> {
+    use std::sync::Arc;
+
+    // Fetch PR metadata and diff on the current async context (Send-safe).
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
+    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let (pr, diff_data) = tokio::try_join!(
+        client.get_pull_request(&repo_info.owner, &repo_info.repo, pr_number),
+        client.get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number),
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Move all non-Send work (AnalysisEngine) to a dedicated thread with its own runtime.
+    let prefs = config.preferences.clone();
+    let root = repo_info.root.clone();
+    let dispatcher = Arc::new(crate::llm::create_dispatcher(&config));
+    let diff_text = diff_data.diff;
+    let base_sha = pr.base_sha;
+    let head_sha = pr.head_sha;
+
+    tokio::task::spawn_blocking(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        rt.block_on(async move {
+            let engine = AnalysisEngine::new(
+                dispatcher,
+                prefs.large_pr_threshold,
+                5,
+                prefs.max_file_context,
+                None, // no cache — GUI returns result directly
+                false,
+                root,
+            );
+            let ctx = PrContext {
+                pr_number,
+                base_sha,
+                head_sha,
+            };
+            engine
+                .run(&diff_text, &ctx)
+                .await
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Returns a cached analysis result for the given PR, reading directly from SQLite.
+///
+/// Cache reads are synchronous (rusqlite), so they run in `spawn_blocking`.
+/// Returns `None` when no analysis has been cached yet.
+#[tauri::command]
+async fn get_analysis(pr_number: u64) -> Result<Option<AnalysisResult>, String> {
+    use std::sync::Arc;
+
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
+    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let pr = client
+        .get_pull_request(&repo_info.owner, &repo_info.repo, pr_number)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let provider_name = {
+        let dispatcher = Arc::new(crate::llm::create_dispatcher(&config));
+        dispatcher.provider_name().to_owned()
+    };
+
+    let db_path = repo_info
+        .root
+        .join(".easy-diff")
+        .join("cache")
+        .join("analysis.db");
+    let key = CacheKey {
+        pr_id: pr_number.to_string(),
+        base_sha: pr.base_sha,
+        head_sha: pr.head_sha,
+        provider: provider_name,
+    };
+
+    tokio::task::spawn_blocking(move || -> Result<Option<AnalysisResult>, String> {
+        let cache = match CacheStore::open(&db_path) {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+
+        let pass1 = match cache.get_pass1(&key).map_err(|e| e.to_string())? {
+            Some(p1) => p1,
+            None => return Ok(None),
+        };
+
+        let cached_files = cache.get_cached_files(&key).map_err(|e| e.to_string())?;
+        let mut files = std::collections::HashMap::new();
+        for path in cached_files {
+            if let Ok(Some(p2)) = cache.get_pass2(&key, &path) {
+                files.insert(path, p2);
+            }
+        }
+
+        Ok(Some(AnalysisResult {
+            pass1,
+            files,
+            has_changes_since_viewed: std::collections::HashMap::new(),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Returns the parsed diff for the given PR as a structured list of [`DiffFile`]s.
+#[tauri::command]
+async fn get_diff(pr_number: u64) -> Result<Vec<DiffFile>, String> {
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
+    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let diff_data = client
+        .get_pull_request_diff(&repo_info.owner, &repo_info.repo, pr_number)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(parse_diff(&diff_data.diff))
+}
+
+/// Returns the cached Pass 1 summary for the given PR, if available.
+///
+/// Cache reads are synchronous (rusqlite), so they run in `spawn_blocking`.
+#[tauri::command]
+async fn get_pass1_summary(pr_number: u64) -> Result<Option<Pass1Output>, String> {
+    use std::sync::Arc;
+
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
+    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let pr = client
+        .get_pull_request(&repo_info.owner, &repo_info.repo, pr_number)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let provider_name = {
+        let dispatcher = Arc::new(crate::llm::create_dispatcher(&config));
+        dispatcher.provider_name().to_owned()
+    };
+
+    let db_path = repo_info
+        .root
+        .join(".easy-diff")
+        .join("cache")
+        .join("analysis.db");
+    let key = CacheKey {
+        pr_id: pr_number.to_string(),
+        base_sha: pr.base_sha,
+        head_sha: pr.head_sha,
+        provider: provider_name,
+    };
+
+    tokio::task::spawn_blocking(move || -> Result<Option<Pass1Output>, String> {
+        let cache = match CacheStore::open(&db_path) {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+        cache.get_pass1(&key).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---------------------------------------------------------------------------
 // Application entry point
 // ---------------------------------------------------------------------------
@@ -94,6 +291,10 @@ pub fn run() {
             list_pull_requests,
             get_repo_info,
             get_config,
+            run_analysis,
+            get_analysis,
+            get_diff,
+            get_pass1_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

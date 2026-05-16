@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 8 — GUI Diff Viewer + Inspector (COMPLETE)
-## Next Epic: 9 — Review Workflow
+## Current Epic: 9 — Review Workflow (COMPLETE)
+## Next Epic: 10 — BitBucket Cloud Support
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -234,6 +234,27 @@
   hunks. Auto-collapse on review, auto-expand on unmark. Progress bar and Show
   counts update live from stores. PR #31 on GitHub.
 
+- **Epic 9 PR-0**: Comment model and local storage. `ReviewComment` and
+  `CategoryOverride` structs in `src/cache/mod.rs`. SQLite tables
+  `review_comments` and `category_overrides`. Full CRUD methods:
+  `add_comment`, `list_comments`, `update_comment`, `delete_comment`,
+  `set_override`, `get_overrides`, `delete_override`, `mark_comments_submitted`.
+  7 unit tests. PR #32 on GitHub.
+
+- **Epic 9 PR-1**: Comment UI and right-click context menu. 6 Tauri commands
+  (`add_comment`, `list_comments`, `update_comment`, `delete_comment`,
+  `set_category_override`, `get_category_overrides`). Frontend components:
+  `CommentInput.svelte`, `DraftComment.svelte`, `ContextMenu.svelte`. Stores:
+  `draftComments`, `categoryOverrides`. Wired into `InlineDiff` and `SplitDiff`
+  with click-to-comment on line numbers and right-click context menu. PR #33.
+
+- **Epic 9 PR-2**: Review submission to GitHub. `ReviewEvent` enum and
+  `ReviewCommentPayload` struct in `src/platform/mod.rs`. `submit_review`
+  method on `GithubOperations` trait, implemented for both REST API
+  (`GithubClient`) and gh CLI (`GhClient`). `submit_review` Tauri command.
+  `SubmitReviewDialog.svelte` modal with verdict selection, body textarea,
+  include-summary toggle, and comment count. PR #34 on GitHub.
+
 ## In Progress
 (none)
 
@@ -401,9 +422,17 @@
   `spawn_blocking` + nested `current_thread` tokio runtime because `rusqlite::Connection`
   (via `RefCell`) makes `AnalysisEngine` `!Send`.
 
+## Decisions & Divergences (Epic 9)
+- **`#[allow(dead_code)]` on review types**: `ReviewEvent`, `ReviewCommentPayload`,
+  `GithubReviewRequest`, `GithubReviewComment`, and the `submit_review` methods
+  are only called from the `gui` feature-gated Tauri commands. Without the feature,
+  clippy reports dead code. Suppressed with `#[allow(dead_code)]` on individual items.
+- **No BitBucket submission**: Per spec, submission is GitHub-only in Epic 9.
+  BitBucket support deferred to Epic 10.
+
 ## Next Steps
-- Epic 9: Review Workflow — comment creation, local storage, submission to
-  GitHub/BitBucket, right-click context menu for manual recategorization.
+- Epic 10: BitBucket Cloud Support — REST API client, PR listing, diff fetching,
+  review submission, dual-platform routing.
 
 ## Post-MVP Addons Completed
 - **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`

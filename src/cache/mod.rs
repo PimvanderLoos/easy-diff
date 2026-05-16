@@ -485,6 +485,20 @@ impl CacheStore {
         Ok(affected > 0)
     }
 
+    /// Marks all draft comments for `pr_id` as [`CommentStatus::Submitted`].
+    ///
+    /// Called after a successful review submission so local state stays in sync
+    /// with what was sent to the platform.
+    ///
+    /// Returns the number of rows updated.
+    pub fn mark_comments_submitted(&self, pr_id: &str) -> Result<usize, CacheError> {
+        let affected = self.conn.execute(
+            "UPDATE review_comments SET status = 'submitted' WHERE pr_id = ?1 AND status = 'draft'",
+            params![pr_id],
+        )?;
+        Ok(affected)
+    }
+
     // ── Category override CRUD ───────────────────────────────────────────────
 
     /// Inserts or replaces a [`CategoryOverride`] for the given `(pr_id, file_path, hunk_id)`.
@@ -1063,6 +1077,49 @@ mod tests {
         assert_eq!(pr42[0].pr_id, "42");
         assert_eq!(pr99.len(), 1);
         assert_eq!(pr99[0].pr_id, "99");
+    }
+
+    #[test]
+    fn mark_comments_submitted_updates_all_drafts() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store
+            .add_comment(&sample_comment("42", "src/a.rs"))
+            .unwrap();
+        store
+            .add_comment(&sample_comment("42", "src/b.rs"))
+            .unwrap();
+        // a comment for a different PR — must NOT be touched
+        store
+            .add_comment(&sample_comment("99", "src/c.rs"))
+            .unwrap();
+
+        // execute
+        let count = store.mark_comments_submitted("42").unwrap();
+
+        // verify — two PR-42 comments become Submitted; PR-99 stays Draft
+        assert_eq!(count, 2);
+        let pr42 = store.list_comments("42").unwrap();
+        assert!(pr42.iter().all(|c| c.status == CommentStatus::Submitted));
+        let pr99 = store.list_comments("99").unwrap();
+        assert!(pr99.iter().all(|c| c.status == CommentStatus::Draft));
+    }
+
+    #[test]
+    fn mark_comments_submitted_is_idempotent() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store
+            .add_comment(&sample_comment("42", "src/a.rs"))
+            .unwrap();
+
+        // execute — call twice
+        let first = store.mark_comments_submitted("42").unwrap();
+        let second = store.mark_comments_submitted("42").unwrap();
+
+        // verify — second call updates 0 rows (already submitted)
+        assert_eq!(first, 1);
+        assert_eq!(second, 0);
     }
 
     // ── CategoryOverride CRUD ─────────────────────────────────────────────────

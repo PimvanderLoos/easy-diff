@@ -1,4 +1,4 @@
-//! GitHub REST API v3 client: PR listing and diff fetching.
+//! GitHub REST API v3 client: PR listing, diff fetching, and review submission.
 //!
 //! # Example
 //! ```no_run
@@ -9,9 +9,12 @@
 //! // let diff = client.get_pull_request_diff("owner", "repo", 42).await?;
 //! ```
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::platform::{GithubOperations, PlatformError, PullRequest, PullRequestDiff};
+use crate::platform::{
+    GithubOperations, PlatformError, PullRequest, PullRequestDiff, ReviewCommentPayload,
+    ReviewEvent,
+};
 
 const BASE_URL: &str = "https://api.github.com";
 
@@ -115,6 +118,49 @@ impl GithubClient {
         let diff = response.text().await?;
         Ok(PullRequestDiff { pr_number, diff })
     }
+
+    /// Submits a pull request review via `POST /repos/{owner}/{repo}/pulls/{pr_number}/reviews`.
+    ///
+    /// The review may include an optional top-level `body` and a list of inline
+    /// `comments`. The `event` determines the review verdict: Approve, Request Changes,
+    /// or neutral Comment.
+    pub async fn submit_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        event: ReviewEvent,
+        body: Option<&str>,
+        comments: Vec<ReviewCommentPayload>,
+    ) -> Result<(), PlatformError> {
+        let url = format!("{BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
+
+        let payload = GithubReviewRequest {
+            event,
+            body: body.map(str::to_owned),
+            comments: comments
+                .into_iter()
+                .map(|c| GithubReviewComment {
+                    path: c.path,
+                    line: c.line,
+                    body: c.body,
+                })
+                .collect(),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        check_rate_limit(&response);
+        check_status(response).await?;
+        Ok(())
+    }
 }
 
 impl GithubOperations for GithubClient {
@@ -142,6 +188,19 @@ impl GithubOperations for GithubClient {
         pr_number: u64,
     ) -> Result<PullRequestDiff, PlatformError> {
         self.get_pull_request_diff(owner, repo, pr_number).await
+    }
+
+    async fn submit_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        event: ReviewEvent,
+        body: Option<&str>,
+        comments: Vec<ReviewCommentPayload>,
+    ) -> Result<(), PlatformError> {
+        self.submit_review(owner, repo, pr_number, event, body, comments)
+            .await
     }
 }
 
@@ -209,8 +268,25 @@ async fn check_status(response: reqwest::Response) -> Result<reqwest::Response, 
 }
 
 // ---------------------------------------------------------------------------
-// Private GitHub API response types
+// Private GitHub API request / response types
 // ---------------------------------------------------------------------------
+
+/// Request body for `POST /repos/{owner}/{repo}/pulls/{pr_number}/reviews`.
+#[derive(Serialize)]
+struct GithubReviewRequest {
+    event: ReviewEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+    comments: Vec<GithubReviewComment>,
+}
+
+/// A single inline comment within a [`GithubReviewRequest`].
+#[derive(Serialize)]
+struct GithubReviewComment {
+    path: String,
+    line: u32,
+    body: String,
+}
 
 #[derive(Deserialize)]
 struct GithubPullRequest {
@@ -358,5 +434,120 @@ mod tests {
         assert_eq!(pr.number, 1);
         assert_eq!(pr.title, "Test PR");
         assert_eq!(pr.user.login, "user1");
+    }
+
+    // ── ReviewEvent serialisation ─────────────────────────────────────────────
+
+    #[test]
+    fn review_event_serialize_approve() {
+        // setup
+        // execute
+        let json = serde_json::to_string(&ReviewEvent::Approve).unwrap();
+
+        // verify
+        assert_eq!(json, r#""APPROVE""#);
+    }
+
+    #[test]
+    fn review_event_serialize_request_changes() {
+        // setup
+        // execute
+        let json = serde_json::to_string(&ReviewEvent::RequestChanges).unwrap();
+
+        // verify
+        assert_eq!(json, r#""REQUEST_CHANGES""#);
+    }
+
+    #[test]
+    fn review_event_serialize_comment() {
+        // setup
+        // execute
+        let json = serde_json::to_string(&ReviewEvent::Comment).unwrap();
+
+        // verify
+        assert_eq!(json, r#""COMMENT""#);
+    }
+
+    // ── Review payload construction ───────────────────────────────────────────
+
+    #[test]
+    fn submit_review_payload_construction_no_comments() {
+        // setup
+        let req = GithubReviewRequest {
+            event: ReviewEvent::Approve,
+            body: Some("LGTM!".into()),
+            comments: vec![],
+        };
+
+        // execute
+        let json: serde_json::Value = serde_json::to_value(&req).unwrap();
+
+        // verify
+        assert_eq!(json["event"], "APPROVE");
+        assert_eq!(json["body"], "LGTM!");
+        assert!(json["comments"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn submit_review_payload_construction_with_comments() {
+        // setup
+        let req = GithubReviewRequest {
+            event: ReviewEvent::RequestChanges,
+            body: None,
+            comments: vec![
+                GithubReviewComment {
+                    path: "src/main.rs".into(),
+                    line: 42,
+                    body: "This looks risky.".into(),
+                },
+                GithubReviewComment {
+                    path: "src/lib.rs".into(),
+                    line: 10,
+                    body: "Consider a helper.".into(),
+                },
+            ],
+        };
+
+        // execute
+        let json: serde_json::Value = serde_json::to_value(&req).unwrap();
+
+        // verify
+        assert_eq!(json["event"], "REQUEST_CHANGES");
+        // body is absent because skip_serializing_if = None
+        assert!(json.get("body").is_none());
+        let comments = json["comments"].as_array().unwrap();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0]["path"], "src/main.rs");
+        assert_eq!(comments[0]["line"], 42);
+        assert_eq!(comments[0]["body"], "This looks risky.");
+        assert_eq!(comments[1]["path"], "src/lib.rs");
+    }
+
+    #[test]
+    fn submit_review_payload_matches_github_api_spec() {
+        // setup — verifies the shape documented in GitHub API docs:
+        // event: string, body: string, comments: [{path, line, body}]
+        let req = GithubReviewRequest {
+            event: ReviewEvent::Comment,
+            body: Some("Please review these changes.".into()),
+            comments: vec![GithubReviewComment {
+                path: "README.md".into(),
+                line: 1,
+                body: "Update the intro paragraph.".into(),
+            }],
+        };
+
+        // execute
+        let json: serde_json::Value = serde_json::to_value(&req).unwrap();
+
+        // verify top-level keys match GitHub API spec
+        assert!(json.get("event").is_some());
+        assert!(json.get("body").is_some());
+        assert!(json.get("comments").is_some());
+        // verify comment shape
+        let c = &json["comments"][0];
+        assert!(c.get("path").is_some());
+        assert!(c.get("line").is_some());
+        assert!(c.get("body").is_some());
     }
 }

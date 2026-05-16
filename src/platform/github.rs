@@ -11,11 +11,12 @@
 
 use serde::Deserialize;
 
-use crate::platform::{PlatformError, PullRequest, PullRequestDiff};
+use crate::platform::{GithubOperations, PlatformError, PullRequest, PullRequestDiff};
 
 const BASE_URL: &str = "https://api.github.com";
 
 /// GitHub REST API v3 client authenticated with a personal access token.
+#[derive(Debug)]
 pub struct GithubClient {
     client: reqwest::Client,
     token: String,
@@ -113,6 +114,34 @@ impl GithubClient {
 
         let diff = response.text().await?;
         Ok(PullRequestDiff { pr_number, diff })
+    }
+}
+
+impl GithubOperations for GithubClient {
+    async fn list_open_pull_requests(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequest>, PlatformError> {
+        self.list_open_pull_requests(owner, repo).await
+    }
+
+    async fn get_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequest, PlatformError> {
+        self.get_pull_request(owner, repo, pr_number).await
+    }
+
+    async fn get_pull_request_diff(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequestDiff, PlatformError> {
+        self.get_pull_request_diff(owner, repo, pr_number).await
     }
 }
 

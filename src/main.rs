@@ -14,8 +14,8 @@ mod tui;
 
 use analysis::{AnalysisEngine, PrContext};
 use cache::CacheStore;
-use platform::github::GithubClient;
-use platform::{Platform, PullRequest};
+use platform::github_provider::create_github_provider;
+use platform::{GithubOperations, Platform, PullRequest};
 
 /// LLM-powered PR review tool.
 #[derive(Parser)]
@@ -70,18 +70,10 @@ async fn main() -> Result<()> {
         );
     }
 
-    // 5. Get token
-    let token = config.github.token.ok_or_else(|| {
-        anyhow::anyhow!(
-            "GitHub token not configured — add [github] token = \"...\" to {}",
-            config::global_config_path()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "~/.config/easy-diff/config.toml".into())
-        )
-    })?;
-
-    // 6. Create client
-    let client = GithubClient::new(token);
+    // 5. Resolve GitHub backend (gh CLI or REST API)
+    let client = create_github_provider(&config.github, &repo_info.host)
+        .await
+        .context("failed to initialize GitHub provider")?;
 
     // 7. Determine whether we are in interactive mode (TTY available)
     let is_interactive = atty::is(atty::Stream::Stdin);

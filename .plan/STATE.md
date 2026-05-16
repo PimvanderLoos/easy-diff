@@ -139,6 +139,15 @@
   Full MVP flow: select PR → estimate → confirm → analyze → summarize → filter → render.
   104 total tests pass. PR #19 on GitHub.
 
+- **Post-MVP: `gh` CLI backend**: Added `gh`-based GitHub provider backend.
+  `GithubBackend` enum (`auto`/`gh`/`api`) in config. `GhClient` in
+  `src/platform/github_gh.rs` shells out to `gh pr list/view/diff --json`.
+  `GithubProvider` enum + `create_github_provider` factory in
+  `src/platform/github_provider.rs` selects backend based on config +
+  runtime availability. `GithubOperations` trait in `src/platform/mod.rs`
+  abstracts both clients. `RepoInfo` now includes `host` field for GHE
+  support. 123 total tests pass (119 unit + 4 integration).
+
 ## In Progress
 (none)
 
@@ -278,3 +287,10 @@
 ## Next Steps
 - Epic 6: BitBucket Cloud Support — REST API client, remote URL parsing, platform
   auto-detection for both GitHub and BitBucket.
+
+## Post-MVP Addons Completed
+- **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`
+  credentials over a PAT. Config: `[github] backend = "auto" | "gh" | "api"`.
+  Files: `src/platform/github_gh.rs`, `src/platform/github_provider.rs`,
+  `src/platform/mod.rs`, `src/config/mod.rs`, `src/git/mod.rs`, `src/main.rs`,
+  `tests/cli.rs`.

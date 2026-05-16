@@ -883,7 +883,10 @@ mod tests {
             BitbucketConfig, Config, GithubConfig, LlmConfig, Preferences, Provider,
         };
         let config = Config {
-            github: GithubConfig { token: None },
+            github: GithubConfig {
+                token: None,
+                backend: Default::default(),
+            },
             bitbucket: BitbucketConfig {
                 username: None,
                 app_password: None,

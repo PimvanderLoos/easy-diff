@@ -37,11 +37,26 @@ pub struct Config {
     pub preferences: Preferences,
 }
 
+/// GitHub backend selection.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubBackend {
+    /// Prefer `gh` CLI if available and authenticated, fall back to API/PAT.
+    #[default]
+    Auto,
+    /// Use `gh` CLI exclusively.
+    Gh,
+    /// Use the REST API with a personal access token exclusively.
+    Api,
+}
+
 /// GitHub integration settings.
 #[derive(Debug, Clone, Default)]
 pub struct GithubConfig {
     /// Personal access token for GitHub API calls.
     pub token: Option<String>,
+    /// Which backend to use for GitHub operations.
+    pub backend: GithubBackend,
 }
 
 /// Bitbucket integration settings.
@@ -130,6 +145,7 @@ struct RawRepoConfig {
 #[derive(Debug, Deserialize)]
 struct RawGithubConfig {
     token: Option<String>,
+    backend: Option<GithubBackend>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -232,6 +248,11 @@ fn merge(global: Option<RawGlobalConfig>, repo: Option<RawRepoConfig>) -> Config
             .as_ref()
             .and_then(|c| c.github.as_ref())
             .and_then(|g| g.token.clone()),
+        backend: global
+            .as_ref()
+            .and_then(|c| c.github.as_ref())
+            .and_then(|g| g.backend.clone())
+            .unwrap_or_default(),
     };
 
     let bitbucket = BitbucketConfig {
@@ -461,6 +482,95 @@ mod tests {
         assert!(
             result.is_err(),
             "unknown provider should fail deserialization"
+        );
+    }
+
+    #[test]
+    fn deserialize_github_backend_gh() {
+        // setup
+        let toml = r#"
+            [github]
+            backend = "gh"
+        "#;
+
+        // execute
+        let raw: RawGlobalConfig = toml::from_str(toml).expect("valid toml");
+
+        // verify
+        assert_eq!(
+            raw.github.as_ref().unwrap().backend,
+            Some(GithubBackend::Gh)
+        );
+    }
+
+    #[test]
+    fn deserialize_github_backend_api() {
+        // setup
+        let toml = r#"
+            [github]
+            backend = "api"
+        "#;
+
+        // execute
+        let raw: RawGlobalConfig = toml::from_str(toml).expect("valid toml");
+
+        // verify
+        assert_eq!(
+            raw.github.as_ref().unwrap().backend,
+            Some(GithubBackend::Api)
+        );
+    }
+
+    #[test]
+    fn deserialize_github_backend_auto() {
+        // setup
+        let toml = r#"
+            [github]
+            backend = "auto"
+        "#;
+
+        // execute
+        let raw: RawGlobalConfig = toml::from_str(toml).expect("valid toml");
+
+        // verify
+        assert_eq!(
+            raw.github.as_ref().unwrap().backend,
+            Some(GithubBackend::Auto)
+        );
+    }
+
+    #[test]
+    fn deserialize_github_backend_missing_defaults_to_auto() {
+        // setup
+        let toml = r#"
+            [github]
+            token = "ghp_test"
+        "#;
+
+        // execute
+        let raw: RawGlobalConfig = toml::from_str(toml).expect("valid toml");
+
+        // verify
+        assert!(raw.github.as_ref().unwrap().backend.is_none());
+        let config = merge(Some(raw), None);
+        assert_eq!(config.github.backend, GithubBackend::Auto);
+    }
+
+    #[test]
+    fn deserialize_unknown_github_backend_fails() {
+        // setup
+        let toml = r#"
+            [github]
+            backend = "graphql"
+        "#;
+
+        // execute
+        let result = toml::from_str::<RawGlobalConfig>(toml);
+
+        // verify
+        assert!(
+            result.is_err(),
+            "unknown backend should fail deserialization"
         );
     }
 }

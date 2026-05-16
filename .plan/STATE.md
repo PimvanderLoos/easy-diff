@@ -205,8 +205,38 @@
   PrRow with avatar, title, branch, status. Svelte stores for screen routing.
   Placeholder review screen on PR click. PR #27 on GitHub.
 
+- **Epic 8 PR-0**: Tauri commands for review data + review screen layout + left rail.
+  - 4 Tauri commands added to `src/gui/mod.rs`: `run_analysis`, `get_analysis`,
+    `get_diff`, `get_pass1_summary`. Fixed existing `list_pull_requests` to pass
+    the `host` arg to `create_github_provider` (was a pre-existing bug).
+  - Frontend types added to `types.ts`: `DiffLineData`, `HunkData`, `Classification`,
+    `FileEntry`, `Pass1Output`, `Pass2Output`, `AnalysisResult`, `FilterState`,
+    `CHANGE_TYPES`, `ATTENTION_TAGS`, `edTagColor`, `edTagBg`.
+  - New stores in `stores.ts`: `filterState`, `reviewedFiles`.
+  - New Svelte components: `TagPill.svelte`, `FiltersTab.svelte`, `FilesTab.svelte`,
+    `LeftRail.svelte`, `ReviewScreen.svelte`.
+  - `App.svelte` wired to `ReviewScreen` replacing the placeholder.
+  - 145 Rust tests pass. `cargo clippy -- -D warnings`, `cargo fmt --check` pass.
+  - `npm run build` and `npm run check` both pass with 0 errors.
+
 ## In Progress
 (none)
+
+## Decisions & Divergences (Epic 8)
+- **`run_analysis` uses nested runtime**: `AnalysisEngine` is `!Send` because
+  `CacheStore` wraps `rusqlite::Connection` (which uses `RefCell`). Tauri
+  commands require `Send` futures. Resolved by fetching diff data on the main
+  async context, then moving `AnalysisEngine` construction + `engine.run()` into
+  a `tokio::task::spawn_blocking` closure that builds its own
+  `current_thread` runtime. No cache is passed to the GUI engine (result
+  returned directly); the CLI path continues to handle caching.
+- **`list_pull_requests` bug fixed**: The pre-existing `list_pull_requests` Tauri
+  command was calling `create_github_provider` with only 1 argument and without
+  `.await`. Fixed as part of Epic 8 PR-0 since it was discovered during the
+  compilation pass.
+- **FilesTab drops filter props**: `FilesTab` no longer accepts `filter` /
+  `onFilterChange` props (they were unused). Filter interaction belongs to
+  `FiltersTab`. The parent `LeftRail` passes both to `FiltersTab` only.
 
 ## Decisions & Divergences
 - **schemars added in PR-0**: The open question in PR-0 asked whether to add
@@ -350,8 +380,8 @@
   `list_pull_requests` API — displayed as "—" in the UI. Future enrichment possible.
 
 ## Next Steps
-- Epic 8: GUI Diff Viewer + Inspector — review screen with diff viewer, category
-  filters, file panels, inspector panel, syntax highlighting.
+- Epic 8 PR-1: Custom grid-based diff renderer (InlineDiff + SplitDiff), MainToolbar,
+  FilePanel, FileHeader, HunkSection, get_diff wired into ReviewScreen.
 
 ## Post-MVP Addons Completed
 - **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`

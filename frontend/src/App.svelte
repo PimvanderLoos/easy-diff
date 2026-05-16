@@ -15,6 +15,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import TitleBar from "./lib/components/TitleBar.svelte";
   import PrSelectionScreen from "./lib/components/PrSelectionScreen.svelte";
+  import ReviewScreen from "./lib/components/ReviewScreen.svelte";
   import { currentScreen, selectedPr } from "./lib/stores.js";
   import type { RepoInfo } from "./lib/types.js";
 
@@ -66,28 +67,6 @@
   {#if $currentScreen === "selection"}
     <PrSelectionScreen {repoInfo} />
   {:else if $currentScreen === "review"}
-    <!-- Placeholder review screen — replaced in Epic 8 -->
-    <div
-      class="flex flex-1 items-center justify-center flex-col gap-4"
-    >
-      <div class="text-ed-text" style="font-size: 18px; font-weight: 500;">
-        Review screen
-      </div>
-      {#if $selectedPr}
-        <div
-          class="text-ed-text-muted"
-          style="font-family: var(--font-mono); font-size: 13px;"
-        >
-          #{$selectedPr.number} — {$selectedPr.title}
-        </div>
-      {/if}
-      <button
-        type="button"
-        onclick={() => currentScreen.set("selection")}
-        class="mt-4 px-4 py-2 rounded-md border border-ed-border bg-ed-elevated text-ed-text text-sm font-medium hover:border-ed-accent hover:text-ed-accent transition-colors cursor-pointer"
-      >
-        ← Back to PR list
-      </button>
-    </div>
+    <ReviewScreen />
   {/if}
 </div>

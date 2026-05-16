@@ -30,6 +30,7 @@ pub enum GitError {
 }
 
 /// Information extracted from a git repository's remote URL.
+#[derive(serde::Serialize)]
 pub struct RepoInfo {
     /// Absolute path to the repository working directory.
     pub root: PathBuf,

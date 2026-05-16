@@ -1,5 +1,5 @@
 //! Platform API clients for GitHub and BitBucket Cloud.
-//! Responsible for PR listing, diff fetching, and (future) review submission.
+//! Responsible for PR listing, diff fetching, and review submission.
 //!
 //! The [`Platform`] enum identifies the hosting service from a remote URL.
 //! [`PullRequest`] and [`PullRequestDiff`] are platform-agnostic types returned
@@ -10,6 +10,9 @@
 //! - [`github_gh::GhClient`] — `gh` CLI wrapper using `gh auth login` credentials
 //!
 //! Use [`github_provider::create_github_provider`] to select the appropriate backend.
+//!
+//! Review submission uses [`ReviewEvent`] and [`ReviewCommentPayload`] to build the
+//! payload for `GithubOperations::submit_review`.
 
 pub mod bitbucket;
 pub mod github;
@@ -68,10 +71,40 @@ pub struct PullRequestDiff {
     pub diff: String,
 }
 
-/// Trait for GitHub operations (list PRs, get metadata, get diff).
+/// Review verdict sent to the GitHub API.
+///
+/// Serialises to the uppercase strings required by the GitHub Reviews API
+/// (`APPROVE`, `REQUEST_CHANGES`, `COMMENT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(dead_code)]
+pub enum ReviewEvent {
+    /// Approve the pull request.
+    Approve,
+    /// Request changes before the PR can be merged.
+    RequestChanges,
+    /// Leave a neutral comment review (no approval or rejection).
+    Comment,
+}
+
+/// A single inline comment to attach to a review.
+///
+/// Used by [`GithubOperations::submit_review`] to post line-level feedback.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct ReviewCommentPayload {
+    /// Repository-relative file path.
+    pub path: String,
+    /// Line number in the new file (1-based) at which to anchor the comment.
+    pub line: u32,
+    /// Markdown body of the comment.
+    pub body: String,
+}
+
+/// Trait for GitHub operations (list PRs, get metadata, get diff, submit review).
 ///
 /// Implemented by both the REST API client and the `gh` CLI client.
-#[allow(async_fn_in_trait)]
+#[allow(async_fn_in_trait, dead_code)]
 pub trait GithubOperations {
     /// Lists open pull requests for the given repository.
     async fn list_open_pull_requests(
@@ -95,6 +128,21 @@ pub trait GithubOperations {
         repo: &str,
         pr_number: u64,
     ) -> Result<PullRequestDiff, PlatformError>;
+
+    /// Submits a review (with optional inline comments) to a pull request.
+    ///
+    /// `event` controls whether the review approves, requests changes, or is a
+    /// neutral comment. `body` is the top-level review text (optional).
+    /// `comments` are the inline line-level comments to attach.
+    async fn submit_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        event: ReviewEvent,
+        body: Option<&str>,
+        comments: Vec<ReviewCommentPayload>,
+    ) -> Result<(), PlatformError>;
 }
 
 /// Errors from platform API calls.

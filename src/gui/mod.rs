@@ -21,7 +21,7 @@ use crate::diff::{parse_diff, DiffFile};
 use crate::git;
 use crate::llm::schema::Pass1Output;
 use crate::platform::github_provider;
-use crate::platform::{GithubOperations, PullRequest};
+use crate::platform::{GithubOperations, PullRequest, ReviewCommentPayload, ReviewEvent};
 
 // ---------------------------------------------------------------------------
 // Serialisable DTOs for Tauri IPC
@@ -383,6 +383,153 @@ fn get_category_overrides(pr_id: String) -> Result<Vec<CategoryOverride>, String
     cache.get_overrides(&pr_id).map_err(|e| e.to_string())
 }
 
+/// Submits the accumulated draft comments as a GitHub pull request review.
+///
+/// Steps:
+/// 1. Load draft comments from the local SQLite cache.
+/// 2. If `include_summary`, prepend the cached Pass 1 summary to the review body.
+/// 3. Call `GithubOperations::submit_review` with the resolved verdict and comments.
+/// 4. On success, mark all draft comments for this PR as `Submitted` in the cache.
+///
+/// `verdict` must be one of `"approve"`, `"request_changes"`, or `"comment"` (case-insensitive).
+#[tauri::command]
+async fn submit_review(
+    pr_number: u64,
+    verdict: String,
+    body: Option<String>,
+    include_summary: bool,
+) -> Result<(), String> {
+    let event = match verdict.to_lowercase().as_str() {
+        "approve" => ReviewEvent::Approve,
+        "request_changes" => ReviewEvent::RequestChanges,
+        "comment" => ReviewEvent::Comment,
+        other => return Err(format!("unknown verdict: {other}")),
+    };
+
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
+
+    let pr_id = pr_number.to_string();
+
+    // Load draft comments and optional Pass 1 summary from the cache.
+    let db_path = repo_info
+        .root
+        .join(".easy-diff")
+        .join("cache")
+        .join("analysis.db");
+
+    let (draft_comments, maybe_summary) = tokio::task::spawn_blocking(
+        move || -> Result<(Vec<ReviewComment>, Option<String>), String> {
+            let cache = match CacheStore::open(&db_path) {
+                Ok(c) => c,
+                Err(_) => return Ok((vec![], None)),
+            };
+            let comments = cache.list_comments(&pr_id).map_err(|e| e.to_string())?;
+            let draft: Vec<ReviewComment> = comments
+                .into_iter()
+                .filter(|c| c.status == CommentStatus::Draft)
+                .collect();
+            Ok((draft, None))
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // If include_summary, fetch the Pass 1 summary and prepend it.
+    let final_body: Option<String> = if include_summary {
+        let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+            .await
+            .map_err(|e| e.to_string())?;
+        let pr = client
+            .get_pull_request(&repo_info.owner, &repo_info.repo, pr_number)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let provider_name = {
+            use std::sync::Arc;
+            let dispatcher = Arc::new(crate::llm::create_dispatcher(&config));
+            dispatcher.provider_name().to_owned()
+        };
+
+        let key = CacheKey {
+            pr_id: pr_number.to_string(),
+            base_sha: pr.base_sha,
+            head_sha: pr.head_sha,
+            provider: provider_name,
+        };
+
+        let db_path2 = repo_info
+            .root
+            .join(".easy-diff")
+            .join("cache")
+            .join("analysis.db");
+
+        let summary_opt = tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+            let cache = CacheStore::open(&db_path2).map_err(|e| e.to_string())?;
+            let pass1 = cache.get_pass1(&key).map_err(|e| e.to_string())?;
+            Ok(pass1.map(|p| p.summary))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        let summary_text = summary_opt.unwrap_or_default();
+        match body {
+            Some(b) if !b.trim().is_empty() => Some(format!("{summary_text}\n\n---\n\n{b}")),
+            _ => Some(summary_text),
+        }
+    } else {
+        body.filter(|b| !b.trim().is_empty())
+    };
+
+    let _ = maybe_summary; // unused — summary fetched inline above when needed
+
+    // Build review comment payloads from draft comments.
+    let comment_payloads: Vec<ReviewCommentPayload> = draft_comments
+        .iter()
+        .map(|c| ReviewCommentPayload {
+            path: c.file_path.clone(),
+            line: c.end_line.unwrap_or(c.start_line),
+            body: c.body.clone(),
+        })
+        .collect();
+
+    // Submit the review to GitHub.
+    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    client
+        .submit_review(
+            &repo_info.owner,
+            &repo_info.repo,
+            pr_number,
+            event,
+            final_body.as_deref(),
+            comment_payloads,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Mark all draft comments as submitted.
+    let db_path3 = repo_info
+        .root
+        .join(".easy-diff")
+        .join("cache")
+        .join("analysis.db");
+    let pr_id_for_update = pr_number.to_string();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let cache = CacheStore::open(&db_path3).map_err(|e| e.to_string())?;
+        cache
+            .mark_comments_submitted(&pr_id_for_update)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Application entry point
 // ---------------------------------------------------------------------------
@@ -410,6 +557,7 @@ pub fn run() {
             delete_comment,
             set_category_override,
             get_category_overrides,
+            submit_review,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -32,6 +32,7 @@
   import MainToolbar from "./MainToolbar.svelte";
   import FilePanel from "./FilePanel.svelte";
   import InspectorPanel from "./InspectorPanel.svelte";
+  import SubmitReviewDialog from "./SubmitReviewDialog.svelte";
   import type {
     AnalysisResult,
     FileEntry,
@@ -481,6 +482,28 @@
     focusedHunkId.set(null);
   }
 
+  // ── Submit review dialog ──────────────────────────────────────────────────
+
+  let submitDialogOpen = $state(false);
+
+  const draftCount = $derived($draftComments.filter((c) => c.status === "Draft").length);
+
+  function handleSubmitReviewClick() {
+    submitDialogOpen = true;
+  }
+
+  function handleDialogClose() {
+    submitDialogOpen = false;
+  }
+
+  /** After a successful submission, mark all draft comments as Submitted in the store. */
+  function handleSubmitted() {
+    draftComments.update((prev) =>
+      prev.map((c) => (c.status === "Draft" ? { ...c, status: "Submitted" as const } : c)),
+    );
+    submitDialogOpen = false;
+  }
+
   // ── Theme detection ───────────────────────────────────────────────────────
 
   let isDark = $state(
@@ -533,14 +556,43 @@
       background: var(--ed-panel);
     "
   >
-    <MainToolbar
-      fileIndex={activeFileIndex}
-      totalFiles={files.length}
-      {diffView}
-      onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
-      onPrev={handlePrev}
-      onNext={handleNext}
-    />
+    <div style="position: relative;">
+      <MainToolbar
+        fileIndex={activeFileIndex}
+        totalFiles={files.length}
+        {diffView}
+        onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
+        onPrev={handlePrev}
+        onNext={handleNext}
+      />
+      <!-- Submit review button pinned to the right of the toolbar row -->
+      <div
+        style="
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          transform: translateY(-50%);
+        "
+      >
+        <button
+          onclick={handleSubmitReviewClick}
+          style="
+            background: var(--ed-accent);
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 5px 12px;
+            white-space: nowrap;
+          "
+        >
+          Submit review{draftCount > 0 ? ` (${draftCount})` : ""}
+        </button>
+      </div>
+    </div>
 
     <!-- Diff stack / loading / error states -->
     <div
@@ -608,3 +660,13 @@
     />
   {/if}
 </div>
+
+<!-- Submit review dialog (rendered outside the grid to avoid clipping) -->
+{#if submitDialogOpen}
+  <SubmitReviewDialog
+    {draftCount}
+    prNumber={pr?.number ?? 0}
+    onClose={handleDialogClose}
+    onSubmitted={handleSubmitted}
+  />
+{/if}

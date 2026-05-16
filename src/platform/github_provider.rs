@@ -6,7 +6,10 @@
 use crate::config::{GithubBackend, GithubConfig};
 use crate::platform::github::GithubClient;
 use crate::platform::github_gh::GhClient;
-use crate::platform::{GithubOperations, PlatformError, PullRequest, PullRequestDiff};
+use crate::platform::{
+    GithubOperations, PlatformError, PullRequest, PullRequestDiff, ReviewCommentPayload,
+    ReviewEvent,
+};
 
 /// A resolved GitHub provider that dispatches to either the `gh` CLI or REST API.
 #[derive(Debug)]
@@ -50,6 +53,27 @@ impl GithubOperations for GithubProvider {
         match self {
             Self::Gh(c) => c.get_pull_request_diff(owner, repo, pr_number).await,
             Self::Api(c) => c.get_pull_request_diff(owner, repo, pr_number).await,
+        }
+    }
+
+    async fn submit_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        event: ReviewEvent,
+        body: Option<&str>,
+        comments: Vec<ReviewCommentPayload>,
+    ) -> Result<(), PlatformError> {
+        match self {
+            Self::Gh(c) => {
+                c.submit_review(owner, repo, pr_number, event, body, comments)
+                    .await
+            }
+            Self::Api(c) => {
+                c.submit_review(owner, repo, pr_number, event, body, comments)
+                    .await
+            }
         }
     }
 }

@@ -7,7 +7,10 @@
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::platform::{GithubOperations, PlatformError, PullRequest, PullRequestDiff};
+use crate::platform::{
+    GithubOperations, PlatformError, PullRequest, PullRequestDiff, ReviewCommentPayload,
+    ReviewEvent,
+};
 
 /// GitHub client backed by the `gh` CLI tool.
 ///
@@ -181,6 +184,74 @@ impl GithubOperations for GhClient {
             pr_number,
             diff: output,
         })
+    }
+
+    /// Submits a pull request review via `gh pr review`.
+    ///
+    /// Inline comments are not supported by the `gh pr review` sub-command;
+    /// when `comments` is non-empty each comment is posted separately via
+    /// `gh api` using the REST API endpoint.
+    async fn submit_review(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        event: ReviewEvent,
+        body: Option<&str>,
+        comments: Vec<ReviewCommentPayload>,
+    ) -> Result<(), PlatformError> {
+        let repo_arg = self.repo_arg(owner, repo);
+        let pr_str = pr_number.to_string();
+
+        // Build `gh pr review` args.
+        let verdict_flag = match event {
+            ReviewEvent::Approve => "--approve",
+            ReviewEvent::RequestChanges => "--request-changes",
+            ReviewEvent::Comment => "--comment",
+        };
+
+        let mut args: Vec<&str> = vec!["pr", "review", &pr_str, "--repo", &repo_arg, verdict_flag];
+
+        // `gh pr review --body` accepts the body text inline.
+        let body_owned: String;
+        if let Some(b) = body {
+            body_owned = b.to_owned();
+            args.push("--body");
+            args.push(&body_owned);
+        }
+
+        self.run_gh(&args).await?;
+
+        // Post inline comments via `gh api` (gh pr review does not support them).
+        for comment in &comments {
+            let endpoint = format!(
+                "/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                owner = owner,
+                repo = repo,
+                pr_number = pr_number,
+            );
+            self.run_gh(&[
+                "api",
+                "--method",
+                "POST",
+                &endpoint,
+                "--field",
+                &format!("path={}", comment.path),
+                "--field",
+                &format!("line={}", comment.line),
+                "--field",
+                &format!("body={}", comment.body),
+                "--field",
+                "subject_type=line",
+            ])
+            .await
+            .map_err(|e| PlatformError::ApiError {
+                status: 0,
+                message: format!("failed to post inline comment on {}: {e}", comment.path),
+            })?;
+        }
+
+        Ok(())
     }
 }
 

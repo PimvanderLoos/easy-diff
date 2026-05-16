@@ -16,8 +16,7 @@ mod tui;
 
 use analysis::{AnalysisEngine, PrContext};
 use cache::CacheStore;
-use platform::github_provider::create_github_provider;
-use platform::{GithubOperations, Platform, PullRequest};
+use platform::{create_platform_client, PullRequest};
 
 /// LLM-powered PR review tool.
 #[derive(Parser)]
@@ -92,18 +91,10 @@ async fn main() -> Result<()> {
     let dispatcher = Arc::new(llm::create_dispatcher(&config));
     tracing::info!(provider = dispatcher.provider_name(), "LLM provider ready");
 
-    // 4. Check platform
-    if repo_info.platform != Platform::GitHub {
-        anyhow::bail!(
-            "only GitHub repositories are currently supported (detected: {})",
-            repo_info.platform
-        );
-    }
-
-    // 5. Resolve GitHub backend (gh CLI or REST API)
-    let client = create_github_provider(&config.github, &repo_info.host)
+    // 4. Create platform client (GitHub or BitBucket)
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
-        .context("failed to initialize GitHub provider")?;
+        .context("failed to initialize platform client")?;
 
     // 7. Determine whether we are in interactive mode (TTY available)
     let is_interactive = atty::is(atty::Stream::Stdin);

@@ -187,4 +187,130 @@ pub enum PlatformError {
     ApiError { status: u16, message: String },
     #[error("network error: {0}")]
     Network(#[from] reqwest::Error),
+    #[allow(dead_code)]
+    #[error("operation not supported on {platform}: {operation}")]
+    Unsupported { platform: String, operation: String },
+}
+
+// ---------------------------------------------------------------------------
+// Platform-agnostic client
+// ---------------------------------------------------------------------------
+
+/// Unified platform client that dispatches to the appropriate backend.
+///
+/// Created via [`create_platform_client`] based on the detected platform.
+#[derive(Debug)]
+pub enum PlatformClient {
+    /// GitHub (REST API or gh CLI).
+    Github(github_provider::GithubProvider),
+    /// BitBucket Cloud (REST API).
+    Bitbucket(bitbucket::BitbucketClient),
+}
+
+impl PlatformClient {
+    /// Lists open pull requests for the repository.
+    pub async fn list_open_pull_requests(
+        &self,
+        owner_or_workspace: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequest>, PlatformError> {
+        match self {
+            Self::Github(c) => c.list_open_pull_requests(owner_or_workspace, repo).await,
+            Self::Bitbucket(c) => c.list_open_pull_requests(owner_or_workspace, repo).await,
+        }
+    }
+
+    /// Fetches metadata for a specific pull request.
+    pub async fn get_pull_request(
+        &self,
+        owner_or_workspace: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequest, PlatformError> {
+        match self {
+            Self::Github(c) => {
+                c.get_pull_request(owner_or_workspace, repo, pr_number)
+                    .await
+            }
+            Self::Bitbucket(c) => {
+                c.get_pull_request(owner_or_workspace, repo, pr_number)
+                    .await
+            }
+        }
+    }
+
+    /// Fetches the unified diff for a specific pull request.
+    pub async fn get_pull_request_diff(
+        &self,
+        owner_or_workspace: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PullRequestDiff, PlatformError> {
+        match self {
+            Self::Github(c) => {
+                c.get_pull_request_diff(owner_or_workspace, repo, pr_number)
+                    .await
+            }
+            Self::Bitbucket(c) => {
+                c.get_pull_request_diff(owner_or_workspace, repo, pr_number)
+                    .await
+            }
+        }
+    }
+
+    /// Submits a review. Only supported on GitHub; returns an error for BitBucket.
+    #[allow(dead_code)]
+    pub async fn submit_review(
+        &self,
+        owner_or_workspace: &str,
+        repo: &str,
+        pr_number: u64,
+        event: ReviewEvent,
+        body: Option<&str>,
+        comments: Vec<ReviewCommentPayload>,
+    ) -> Result<(), PlatformError> {
+        match self {
+            Self::Github(c) => {
+                c.submit_review(owner_or_workspace, repo, pr_number, event, body, comments)
+                    .await
+            }
+            Self::Bitbucket(_) => Err(PlatformError::Unsupported {
+                platform: "BitBucket".into(),
+                operation: "submit_review".into(),
+            }),
+        }
+    }
+}
+
+/// Creates a platform client based on the detected platform and configuration.
+///
+/// - `Platform::GitHub` → resolves via [`github_provider::create_github_provider`]
+/// - `Platform::BitBucket` → creates a [`bitbucket::BitbucketClient`] from config credentials
+pub async fn create_platform_client(
+    platform: Platform,
+    config: &crate::config::Config,
+    host: &str,
+) -> Result<PlatformClient, anyhow::Error> {
+    match platform {
+        Platform::GitHub => {
+            let provider = github_provider::create_github_provider(&config.github, host).await?;
+            Ok(PlatformClient::Github(provider))
+        }
+        Platform::BitBucket => {
+            let username = config.bitbucket.username.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "BitBucket access requires credentials — add [bitbucket] username = \"...\" and app_password = \"...\" to your config"
+                )
+            })?;
+            let app_password = config.bitbucket.app_password.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "BitBucket access requires an app password — add [bitbucket] app_password = \"...\" to your config"
+                )
+            })?;
+            Ok(PlatformClient::Bitbucket(bitbucket::BitbucketClient::new(
+                username.clone(),
+                app_password.clone(),
+            )))
+        }
+    }
 }

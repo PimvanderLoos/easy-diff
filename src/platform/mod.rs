@@ -17,7 +17,7 @@ pub mod github_gh;
 pub mod github_provider;
 
 /// Supported code hosting platforms, identified from remote URLs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum Platform {
     GitHub,
     BitBucket,
@@ -33,7 +33,7 @@ impl std::fmt::Display for Platform {
 }
 
 /// A pull request from any supported platform.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PullRequest {
     /// PR number (unique within a repository).
     pub number: u64,

@@ -20,8 +20,7 @@ use crate::config::{self, Provider};
 use crate::diff::{parse_diff, DiffFile};
 use crate::git;
 use crate::llm::schema::Pass1Output;
-use crate::platform::github_provider;
-use crate::platform::{GithubOperations, PullRequest, ReviewCommentPayload, ReviewEvent};
+use crate::platform::{create_platform_client, PullRequest, ReviewCommentPayload, ReviewEvent};
 
 // ---------------------------------------------------------------------------
 // Serialisable DTOs for Tauri IPC
@@ -53,7 +52,7 @@ pub struct GuiConfig {
 async fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
     let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
     let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
-    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .map_err(|e| e.to_string())?;
     client
@@ -97,7 +96,7 @@ async fn run_analysis(pr_number: u64) -> Result<AnalysisResult, String> {
     // Fetch PR metadata and diff on the current async context (Send-safe).
     let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
     let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
-    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -156,7 +155,7 @@ async fn get_analysis(pr_number: u64) -> Result<Option<AnalysisResult>, String> 
 
     let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
     let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
-    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -216,7 +215,7 @@ async fn get_analysis(pr_number: u64) -> Result<Option<AnalysisResult>, String> 
 async fn get_diff(pr_number: u64) -> Result<Vec<DiffFile>, String> {
     let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
     let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
-    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -237,7 +236,7 @@ async fn get_pass1_summary(pr_number: u64) -> Result<Option<Pass1Output>, String
 
     let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
     let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
-    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -437,7 +436,7 @@ async fn submit_review(
 
     // If include_summary, fetch the Pass 1 summary and prepend it.
     let final_body: Option<String> = if include_summary {
-        let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+        let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
             .await
             .map_err(|e| e.to_string())?;
         let pr = client
@@ -493,8 +492,8 @@ async fn submit_review(
         })
         .collect();
 
-    // Submit the review to GitHub.
-    let client = github_provider::create_github_provider(&config.github, &repo_info.host)
+    // Submit the review to the platform.
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .map_err(|e| e.to_string())?;
 

@@ -2,8 +2,8 @@
 
 ## Status: Active Development
 
-## Current Epic: 6 — Progressive Diffs (COMPLETE)
-## Next Epic: 7 — Tauri GUI Shell + PR Selection Screen
+## Current Epic: 7 — Tauri GUI Shell + PR Selection Screen (COMPLETE)
+## Next Epic: 8 — GUI Diff Viewer + Inspector
 
 ## Completed
 - **PR-0**: Rust binary crate initialized with full src/ module skeleton, all
@@ -190,6 +190,21 @@
   `[review] N of M files have changes since last review`. Clean exit when all
   reviewed. 150 tests pass. PR #24 on GitHub.
 
+- **Epic 7 PR-0**: Tauri v2 + Svelte 5 + TypeScript + Vite 6 scaffold. Feature-gated
+  `gui` Cargo feature. Tailwind CSS v4 with full ED_TOKENS palette as CSS custom
+  properties. Dark/light theme toggle. IBM Plex Sans + Mono via @fontsource. CI
+  updated with parallel frontend job. PR #25 on GitHub.
+
+- **Epic 7 PR-1**: Tauri commands (`list_pull_requests`, `get_repo_info`, `get_config`)
+  and shared Svelte components (Avatar, Tag, SidebarRow, SidebarLabel, SeverityDot).
+  TypeScript types matching Rust structs. `Serialize` added to `PullRequest`,
+  `Platform`, `RepoInfo`. PR #26 on GitHub.
+
+- **Epic 7 PR-2**: PR selection screen matching `01_PRselection.png`. TitleBar with
+  brand mark + breadcrumb. Two-column layout: PrFilterSidebar + PrSelectionScreen.
+  PrRow with avatar, title, branch, status. Svelte stores for screen routing.
+  Placeholder review screen on PR click. PR #27 on GitHub.
+
 ## In Progress
 (none)
 
@@ -326,9 +341,17 @@
   without sleep. Acceptable for local CLI subprocesses (no rate limits), but worth
   noting if Gemini CLI ever gains network-rate-limit behavior.
 
+## Decisions & Divergences (Epic 7)
+- **Custom CSS diff renderer**: Per ROADMAP, the design uses a custom CSS Grid-based
+  diff renderer instead of CodeMirror 6 (documented in Epic 8 section).
+- **Feature gate over workspace**: Tauri integration uses `gui` feature flag rather
+  than a separate workspace member for simplicity.
+- **Missing PR metadata**: `files`, `adds`, `dels`, `risky` not available from
+  `list_pull_requests` API — displayed as "—" in the UI. Future enrichment possible.
+
 ## Next Steps
-- Epic 7: Tauri GUI Shell + PR Selection Screen — Tauri v2 + Svelte + TypeScript
-  frontend scaffold, design token system, shared components, PR selection screen.
+- Epic 8: GUI Diff Viewer + Inspector — review screen with diff viewer, category
+  filters, file panels, inspector panel, syntax highlighting.
 
 ## Post-MVP Addons Completed
 - **`gh` CLI backend** — GitHub operations can now prefer `gh auth login`

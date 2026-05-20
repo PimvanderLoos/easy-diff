@@ -1,7 +1,7 @@
 //! Account detection for each LLM provider backend.
 //!
-//! Reads provider-specific config files or runs CLI commands to determine
-//! which account is active. Used at startup to log and verify the identity.
+//! Runs CLI commands or reads config files to determine which account is
+//! active. Used at startup to log and verify the identity.
 //!
 //! # Example
 //!
@@ -29,24 +29,42 @@ use crate::config::{Provider, ProviderSettings};
 /// status string, etc.) or an error if detection fails.
 pub async fn detect_account(provider: &Provider, settings: &ProviderSettings) -> Result<String> {
     match provider {
-        Provider::Claude => detect_claude_account(settings),
+        Provider::Claude => detect_claude_account(settings).await,
         Provider::Codex => detect_codex_account(settings).await,
         Provider::Gemini => detect_gemini_account(settings),
     }
 }
 
-/// Claude: read `<config_dir>/.claude.json` → `oauthAccount.emailAddress`.
-fn detect_claude_account(settings: &ProviderSettings) -> Result<String> {
-    let dir = resolve_config_dir(settings.profile.as_deref(), "CLAUDE_CONFIG_DIR", ".claude");
-    let path = dir.join(".claude.json");
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let json: serde_json::Value = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    json["oauthAccount"]["emailAddress"]
+/// Claude: run `claude auth status` and extract the email from the JSON output.
+async fn detect_claude_account(settings: &ProviderSettings) -> Result<String> {
+    let command = settings.command.as_deref().unwrap_or("claude");
+    let envs: Vec<(&str, &str)> = settings
+        .profile
+        .as_deref()
+        .map(|p| vec![("CLAUDE_CONFIG_DIR", p)])
+        .unwrap_or_default();
+
+    let output = super::run_subprocess(command, &["auth", "status"], "", &envs)
+        .await
+        .context("failed to run claude auth status")?;
+
+    parse_claude_auth_status(&output)
+}
+
+/// Parses the JSON output of `claude auth status`.
+fn parse_claude_auth_status(output: &str) -> Result<String> {
+    let json: serde_json::Value =
+        serde_json::from_str(output.trim()).context("failed to parse claude auth status output")?;
+
+    if json["loggedIn"].as_bool() != Some(true) {
+        bail!("claude is not logged in");
+    }
+
+    let email = json["email"]
         .as_str()
-        .map(String::from)
-        .with_context(|| format!("missing oauthAccount.emailAddress in {}", path.display()))
+        .context("missing 'email' in claude auth status output")?;
+    let org = json["orgName"].as_str().unwrap_or("unknown org");
+    Ok(format!("{email} ({org})"))
 }
 
 /// Codex: run `codex login status` and return the output.
@@ -164,47 +182,59 @@ mod tests {
     }
 
     #[test]
-    fn detect_claude_account_parses_json() {
+    fn parse_claude_auth_status_extracts_email_and_org() {
         // setup
-        let dir = tempfile::tempdir().unwrap();
-        let json = serde_json::json!({
-            "oauthAccount": {
-                "emailAddress": "test@example.com",
-                "organizationName": "Test Org"
-            }
-        });
-        std::fs::write(dir.path().join(".claude.json"), json.to_string()).unwrap();
-
-        let settings = ProviderSettings {
-            profile: Some(dir.path().to_string_lossy().into_owned()),
-            ..Default::default()
-        };
+        let output = r#"{
+            "loggedIn": true,
+            "authMethod": "claude.ai",
+            "email": "test@example.com",
+            "orgName": "Test Org",
+            "subscriptionType": "team"
+        }"#;
 
         // execute
-        let result = detect_claude_account(&settings);
+        let result = parse_claude_auth_status(output);
 
         // verify
-        assert_eq!(result.unwrap(), "test@example.com");
+        assert_eq!(result.unwrap(), "test@example.com (Test Org)");
     }
 
     #[test]
-    fn detect_claude_account_missing_field_errors() {
+    fn parse_claude_auth_status_not_logged_in() {
         // setup
-        let dir = tempfile::tempdir().unwrap();
-        let json = serde_json::json!({"oauthAccount": {}});
-        std::fs::write(dir.path().join(".claude.json"), json.to_string()).unwrap();
-
-        let settings = ProviderSettings {
-            profile: Some(dir.path().to_string_lossy().into_owned()),
-            ..Default::default()
-        };
+        let output = r#"{"loggedIn": false}"#;
 
         // execute
-        let result = detect_claude_account(&settings);
+        let result = parse_claude_auth_status(output);
 
         // verify
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("emailAddress"));
+        assert!(result.unwrap_err().to_string().contains("not logged in"));
+    }
+
+    #[test]
+    fn parse_claude_auth_status_missing_email() {
+        // setup
+        let output = r#"{"loggedIn": true, "orgName": "Org"}"#;
+
+        // execute
+        let result = parse_claude_auth_status(output);
+
+        // verify
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("email"));
+    }
+
+    #[test]
+    fn parse_claude_auth_status_missing_org_uses_default() {
+        // setup
+        let output = r#"{"loggedIn": true, "email": "test@example.com"}"#;
+
+        // execute
+        let result = parse_claude_auth_status(output);
+
+        // verify
+        assert_eq!(result.unwrap(), "test@example.com (unknown org)");
     }
 
     #[test]

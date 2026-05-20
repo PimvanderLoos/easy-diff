@@ -1,13 +1,13 @@
 //! Claude Code CLI backend for the `LlmProvider` trait.
 #![allow(dead_code)]
 
-use super::{extract_json, run_subprocess, LlmError, LlmProvider};
+use super::{account::expand_tilde, extract_json, run_subprocess, LlmError, LlmProvider};
 
 /// Claude Code CLI backend. Invokes the `claude` binary as a subprocess.
 pub struct ClaudeProvider {
     /// Command name or path for the Claude CLI binary.
     command: String,
-    /// Alternate config directory. Passed as `CLAUDE_CONFIG_DIR` env var.
+    /// Alternate config directory (tilde-expanded). Passed as `CLAUDE_CONFIG_DIR` env var.
     profile: Option<String>,
     /// Model override (e.g. `"claude-opus-4-5"`). `None` uses the CLI default.
     model: Option<String>,
@@ -18,7 +18,7 @@ impl ClaudeProvider {
     pub fn new(command: Option<String>, profile: Option<String>, model: Option<String>) -> Self {
         Self {
             command: command.unwrap_or_else(|| "claude".to_string()),
-            profile,
+            profile: profile.map(|p| expand_tilde(&p).to_string_lossy().into_owned()),
             model,
         }
     }

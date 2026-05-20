@@ -7,7 +7,10 @@
 //! schema and retries up to [`GeminiProvider::max_retries`] times, appending
 //! correction context to the prompt on each failed attempt.
 
-use super::{extract_json, run_subprocess, validate_against_schema, LlmError, LlmProvider};
+use super::{
+    account::expand_tilde, extract_json, run_subprocess, validate_against_schema, LlmError,
+    LlmProvider,
+};
 
 /// Only the first N validation errors are appended to the retry prompt to avoid
 /// blowing up the model's context window when the response is very wrong.
@@ -39,7 +42,7 @@ impl GeminiProvider {
     ) -> Self {
         Self {
             command: command.unwrap_or_else(|| "gemini".to_string()),
-            profile,
+            profile: profile.map(|p| expand_tilde(&p).to_string_lossy().into_owned()),
             model,
             max_retries: max_retries.max(1),
         }

@@ -1,13 +1,13 @@
 //! Codex CLI backend for the `LlmProvider` trait.
 #![allow(dead_code)]
 
-use super::{extract_json, run_subprocess, LlmError, LlmProvider};
+use super::{account::expand_tilde, extract_json, run_subprocess, LlmError, LlmProvider};
 
 /// Codex CLI backend. Invokes the `codex` binary as a subprocess.
 pub struct CodexProvider {
     /// Command name or path for the Codex CLI binary.
     command: String,
-    /// Alternate config directory. Passed as `CODEX_HOME` env var.
+    /// Alternate config directory (tilde-expanded). Passed as `CODEX_HOME` env var.
     profile: Option<String>,
     /// Model override (e.g. `"o4-mini"`). `None` uses the CLI default.
     model: Option<String>,
@@ -18,7 +18,7 @@ impl CodexProvider {
     pub fn new(command: Option<String>, profile: Option<String>, model: Option<String>) -> Self {
         Self {
             command: command.unwrap_or_else(|| "codex".to_string()),
-            profile,
+            profile: profile.map(|p| expand_tilde(&p).to_string_lossy().into_owned()),
             model,
         }
     }

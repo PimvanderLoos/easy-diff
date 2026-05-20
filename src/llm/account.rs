@@ -38,8 +38,11 @@ pub async fn detect_account(provider: &Provider, settings: &ProviderSettings) ->
 /// Claude: run `claude auth status` and extract the email from the JSON output.
 async fn detect_claude_account(settings: &ProviderSettings) -> Result<String> {
     let command = settings.command.as_deref().unwrap_or("claude");
-    let envs: Vec<(&str, &str)> = settings
+    let expanded = settings
         .profile
+        .as_deref()
+        .map(|p| expand_tilde(p).to_string_lossy().into_owned());
+    let envs: Vec<(&str, &str)> = expanded
         .as_deref()
         .map(|p| vec![("CLAUDE_CONFIG_DIR", p)])
         .unwrap_or_default();
@@ -70,8 +73,11 @@ fn parse_claude_auth_status(output: &str) -> Result<String> {
 /// Codex: run `codex login status` and return the output.
 async fn detect_codex_account(settings: &ProviderSettings) -> Result<String> {
     let command = settings.command.as_deref().unwrap_or("codex");
-    let envs: Vec<(&str, &str)> = settings
+    let expanded = settings
         .profile
+        .as_deref()
+        .map(|p| expand_tilde(p).to_string_lossy().into_owned());
+    let envs: Vec<(&str, &str)> = expanded
         .as_deref()
         .map(|p| vec![("CODEX_HOME", p)])
         .unwrap_or_default();
@@ -115,7 +121,7 @@ fn resolve_config_dir(profile: Option<&str>, env_var: &str, default_dot_dir: &st
 }
 
 /// Expands a leading `~` to the user's home directory.
-fn expand_tilde(path: &str) -> PathBuf {
+pub(crate) fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         dirs::home_dir()
             .map(|h| h.join(rest))

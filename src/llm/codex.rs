@@ -33,7 +33,7 @@ impl LlmProvider for CodexProvider {
             model_flag = model.clone();
             args.extend_from_slice(&["--model", &model_flag]);
         }
-        let raw = run_subprocess("codex", &args, prompt).await?;
+        let raw = run_subprocess("codex", &args, prompt, &[]).await?;
         extract_json(&raw)
     }
 }

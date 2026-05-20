@@ -55,7 +55,7 @@ impl LlmProvider for GeminiProvider {
                     model_flag = m.clone();
                     args.extend_from_slice(&["--model", &model_flag]);
                 }
-                run_subprocess("gemini", &args, &current_prompt).await
+                run_subprocess("gemini", &args, &current_prompt, &[]).await
             }
         })
         .await

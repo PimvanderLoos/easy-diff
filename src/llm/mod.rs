@@ -176,11 +176,13 @@ pub(crate) async fn run_subprocess(
     program: &str,
     args: &[&str],
     input: &str,
+    envs: &[(&str, &str)],
 ) -> Result<String, LlmError> {
     use tokio::io::AsyncWriteExt as _;
 
     let mut child = tokio::process::Command::new(program)
         .args(args)
+        .envs(envs.iter().copied())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

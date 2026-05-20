@@ -33,7 +33,7 @@ impl LlmProvider for ClaudeProvider {
             model_flag = model.clone();
             args.extend_from_slice(&["--model", &model_flag]);
         }
-        let raw = run_subprocess("claude", &args, prompt).await?;
+        let raw = run_subprocess("claude", &args, prompt, &[]).await?;
         extract_json(&raw)
     }
 }

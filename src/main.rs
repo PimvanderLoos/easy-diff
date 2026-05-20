@@ -71,6 +71,27 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // 1. Detect repo (optional — GUI can start without one)
+    let repo_info = git::detect_repo_info(".").ok();
+    if let Some(ref info) = repo_info {
+        tracing::info!(platform = %info.platform, owner = %info.owner,
+                       repo = %info.repo, "detected repository");
+    }
+
+    // 2. Load config (uses repo root for per-repo config when available)
+    let config = config::load_config(repo_info.as_ref().map(|r| r.root.as_path()))?;
+
+    // 3. Verify account identity — fatal if detection fails
+    let default_settings = config.llm.settings_for(&config.llm.default_provider);
+    let account = llm::account::detect_account(&config.llm.default_provider, default_settings)
+        .await
+        .context("failed to detect LLM account — check your provider config and authentication")?;
+    tracing::info!(
+        provider = ?config.llm.default_provider,
+        account = %account,
+        "LLM account verified"
+    );
+
     // Launch GUI when requested or when no CLI-specific args are given.
     #[cfg(feature = "gui")]
     if cli.gui || (cli.pr.is_none() && !cli.analyze) {
@@ -78,26 +99,12 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // 1. Detect repo
-    let repo_info = git::detect_repo_info(".")
-        .context("not a git repository — run easy-diff from within a git repo")?;
-    tracing::info!(platform = %repo_info.platform, owner = %repo_info.owner,
-                   repo = %repo_info.repo, "detected repository");
+    // CLI mode requires a git repo
+    let repo_info =
+        repo_info.context("not a git repository — run easy-diff from within a git repo")?;
 
-    // 2. Load config (uses repo root for per-repo config)
-    let config = config::load_config(Some(&repo_info.root))?;
-
-    // 3. Create LLM dispatcher and verify account identity
+    // 4. Create LLM dispatcher
     let dispatcher = Arc::new(llm::create_dispatcher(&config));
-    let default_settings = config.llm.settings_for(&config.llm.default_provider);
-    let account = llm::account::detect_account(&config.llm.default_provider, default_settings)
-        .await
-        .context("failed to detect LLM account — check your provider config and authentication")?;
-    tracing::info!(
-        provider = dispatcher.provider_name(),
-        account = %account,
-        "LLM provider ready"
-    );
 
     // 4. Create platform client (GitHub or BitBucket)
     let client = create_platform_client(repo_info.platform, &config, &repo_info.host)

@@ -157,15 +157,30 @@ fn provider_from_config(
 ) -> AnyProvider {
     match provider {
         crate::config::Provider::Claude => {
-            AnyProvider::Claude(claude::ClaudeProvider::new(llm.claude.model.clone()))
+            let s = &llm.claude;
+            AnyProvider::Claude(claude::ClaudeProvider::new(
+                s.command.clone(),
+                s.profile.clone(),
+                s.model.clone(),
+            ))
         }
         crate::config::Provider::Codex => {
-            AnyProvider::Codex(codex::CodexProvider::new(llm.codex.model.clone()))
+            let s = &llm.codex;
+            AnyProvider::Codex(codex::CodexProvider::new(
+                s.command.clone(),
+                s.profile.clone(),
+                s.model.clone(),
+            ))
         }
-        crate::config::Provider::Gemini => AnyProvider::Gemini(gemini::GeminiProvider::new(
-            llm.gemini.model.clone(),
-            llm.max_retries,
-        )),
+        crate::config::Provider::Gemini => {
+            let s = &llm.gemini;
+            AnyProvider::Gemini(gemini::GeminiProvider::new(
+                s.command.clone(),
+                s.profile.clone(),
+                s.model.clone(),
+                llm.max_retries,
+            ))
+        }
     }
 }
 

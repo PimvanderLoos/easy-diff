@@ -86,10 +86,9 @@ async fn main() -> Result<()> {
     let account = llm::account::detect_account(&config.llm.default_provider, default_settings)
         .await
         .context("failed to detect LLM account — check your provider config and authentication")?;
-    tracing::info!(
-        provider = ?config.llm.default_provider,
-        account = %account,
-        "LLM account verified"
+    println!(
+        "[easy-diff] {:?} account: {account}",
+        config.llm.default_provider
     );
 
     // Launch GUI when requested or when no CLI-specific args are given.

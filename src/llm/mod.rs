@@ -19,6 +19,7 @@
 //! // let value = dispatcher.analyze("prompt", &schema).await?;
 //! ```
 
+pub mod account;
 pub mod claude;
 pub mod codex;
 pub mod debug;

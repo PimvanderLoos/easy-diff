@@ -101,6 +101,17 @@ pub struct LlmConfig {
     pub gemini: ProviderSettings,
 }
 
+impl LlmConfig {
+    /// Returns the [`ProviderSettings`] for the given provider variant.
+    pub fn settings_for(&self, provider: &Provider) -> &ProviderSettings {
+        match provider {
+            Provider::Claude => &self.claude,
+            Provider::Codex => &self.codex,
+            Provider::Gemini => &self.gemini,
+        }
+    }
+}
+
 /// Available LLM provider backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

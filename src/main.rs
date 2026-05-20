@@ -71,9 +71,9 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Launch GUI when requested (only available with the `gui` feature).
+    // Launch GUI when requested or when no CLI-specific args are given.
     #[cfg(feature = "gui")]
-    if cli.gui {
+    if cli.gui || (cli.pr.is_none() && !cli.analyze) {
         gui::run();
         return Ok(());
     }
@@ -87,9 +87,17 @@ async fn main() -> Result<()> {
     // 2. Load config (uses repo root for per-repo config)
     let config = config::load_config(Some(&repo_info.root))?;
 
-    // 3. Create LLM dispatcher
+    // 3. Create LLM dispatcher and verify account identity
     let dispatcher = Arc::new(llm::create_dispatcher(&config));
-    tracing::info!(provider = dispatcher.provider_name(), "LLM provider ready");
+    let default_settings = config.llm.settings_for(&config.llm.default_provider);
+    let account = llm::account::detect_account(&config.llm.default_provider, default_settings)
+        .await
+        .context("failed to detect LLM account — check your provider config and authentication")?;
+    tracing::info!(
+        provider = dispatcher.provider_name(),
+        account = %account,
+        "LLM provider ready"
+    );
 
     // 4. Create platform client (GitHub or BitBucket)
     let client = create_platform_client(repo_info.platform, &config, &repo_info.host)

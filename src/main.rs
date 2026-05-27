@@ -88,11 +88,20 @@ async fn main() -> Result<()> {
     // 2. Load config (uses repo root for per-repo config)
     let config = config::load_config(Some(&repo_info.root))?;
 
-    // 3. Create LLM dispatcher
-    let dispatcher = Arc::new(llm::create_dispatcher(&config));
-    tracing::info!(provider = dispatcher.provider_name(), "LLM provider ready");
+    // 3. Verify account identity — fatal if detection fails
+    let default_settings = config.llm.settings_for(&config.llm.default_provider);
+    let account = llm::account::detect_account(&config.llm.default_provider, default_settings)
+        .await
+        .context("failed to detect LLM account — check your provider config and authentication")?;
+    println!(
+        "[easy-diff] {:?} account: {account}",
+        config.llm.default_provider
+    );
 
-    // 4. Create platform client (GitHub or BitBucket)
+    // 4. Create LLM dispatcher
+    let dispatcher = Arc::new(llm::create_dispatcher(&config));
+
+    // 5. Create platform client (GitHub or BitBucket)
     let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .context("failed to initialize platform client")?;

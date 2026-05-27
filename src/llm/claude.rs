@@ -46,7 +46,23 @@ impl LlmProvider for ClaudeProvider {
             .map(|p| vec![("CLAUDE_CONFIG_DIR", p)])
             .unwrap_or_default();
         let raw = run_subprocess(&self.command, &args, prompt, &envs).await?;
-        extract_json(&raw)
+        let envelope = extract_json(&raw)?;
+        unwrap_claude_envelope(envelope)
+    }
+}
+
+/// Unwraps the Claude Code CLI JSON envelope to extract the model's response.
+///
+/// When invoked with `--output-format json`, the CLI wraps the model output in
+/// an envelope with metadata fields (`is_error`, `modelUsage`, `session_id`, etc.).
+/// The actual model response lives in the `"result"` field as an escaped JSON string.
+/// If the parsed value doesn't look like an envelope (no `"result"` string field),
+/// it's returned as-is (the model may have output raw JSON directly).
+fn unwrap_claude_envelope(value: serde_json::Value) -> Result<serde_json::Value, LlmError> {
+    if let Some(result_str) = value.get("result").and_then(|v| v.as_str()) {
+        extract_json(result_str)
+    } else {
+        Ok(value)
     }
 }
 
@@ -79,5 +95,38 @@ mod tests {
 
         // verify
         assert_eq!(provider.command, "/usr/local/bin/claude");
+    }
+
+    #[test]
+    fn unwrap_envelope_extracts_result_field() {
+        // setup
+        let envelope = serde_json::json!({
+            "is_error": false,
+            "result": "{\"summary\":\"test summary\",\"change_types\":[\"feature\"]}",
+            "session_id": "abc-123",
+            "type": "result"
+        });
+
+        // execute
+        let extracted = unwrap_claude_envelope(envelope).unwrap();
+
+        // verify
+        assert_eq!(extracted["summary"], "test summary");
+        assert_eq!(extracted["change_types"][0], "feature");
+    }
+
+    #[test]
+    fn unwrap_envelope_passes_through_raw_json() {
+        // setup
+        let raw = serde_json::json!({
+            "summary": "direct output",
+            "change_types": ["bug-fix"]
+        });
+
+        // execute
+        let extracted = unwrap_claude_envelope(raw).unwrap();
+
+        // verify
+        assert_eq!(extracted["summary"], "direct output");
     }
 }

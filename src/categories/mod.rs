@@ -15,7 +15,7 @@
 //!
 //! assert_eq!(format!("{}", ChangeType::BugFix), "bug-fix");
 //! assert_eq!(ChangeType::all().len(), 10);
-//! assert_eq!(AttentionTag::all().len(), 7);
+//! assert_eq!(AttentionTag::all().len(), 10);
 //! ```
 
 use schemars::JsonSchema;
@@ -97,7 +97,11 @@ impl fmt::Display for ChangeType {
     }
 }
 
-/// Tags that flag areas requiring reviewer attention.
+/// Tags that characterise changes for reviewer attention and filtering.
+///
+/// Every file and PR-level summary must have at least one tag. Tags range from
+/// high-severity flags (`security`, `breaking-change`) to routine descriptors
+/// (`straightforward`, `well-tested`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum AttentionTag {
@@ -115,6 +119,12 @@ pub enum AttentionTag {
     Nitpick,
     /// Change embeds a significant design decision worth discussing.
     DesignDecision,
+    /// Change is straightforward and low-risk.
+    Straightforward,
+    /// Change is accompanied by good test coverage.
+    WellTested,
+    /// Change improves code clarity or maintainability.
+    CleanUp,
 }
 
 impl AttentionTag {
@@ -129,6 +139,9 @@ impl AttentionTag {
             Self::OffTopic => "Unrelated to the PR's stated purpose.",
             Self::Nitpick => "Minor style or naming issue; low priority.",
             Self::DesignDecision => "Embeds a significant design choice worth discussing.",
+            Self::Straightforward => "Simple, low-risk change that needs minimal scrutiny.",
+            Self::WellTested => "Accompanied by thorough automated test coverage.",
+            Self::CleanUp => "Improves code clarity, naming, or structure.",
         }
     }
 
@@ -144,6 +157,9 @@ impl AttentionTag {
             Self::OffTopic,
             Self::Nitpick,
             Self::DesignDecision,
+            Self::Straightforward,
+            Self::WellTested,
+            Self::CleanUp,
         ]
     }
 }
@@ -238,6 +254,6 @@ mod tests {
         let all = AttentionTag::all();
 
         // verify — update this count when adding new variants
-        assert_eq!(all.len(), 7);
+        assert_eq!(all.len(), 10);
     }
 }

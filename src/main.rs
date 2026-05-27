@@ -22,12 +22,12 @@ use platform::{create_platform_client, PullRequest};
 #[derive(Parser)]
 #[command(name = "easy-diff", about = "LLM-powered PR review tool", version)]
 struct Cli {
-    /// Launch the graphical user interface.
+    /// Force CLI mode even when compiled with the GUI feature.
     ///
     /// Only available when compiled with the `gui` feature.
     #[cfg(feature = "gui")]
     #[arg(long)]
-    gui: bool,
+    cli: bool,
 
     /// Fetch and display the diff for a specific PR number.
     ///
@@ -71,15 +71,22 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // 1. Detect repo (optional — GUI can start without one)
-    let repo_info = git::detect_repo_info(".").ok();
-    if let Some(ref info) = repo_info {
-        tracing::info!(platform = %info.platform, owner = %info.owner,
-                       repo = %info.repo, "detected repository");
+    // When compiled with the GUI feature, launch the GUI by default.
+    // Use --cli to force CLI mode from a gui-enabled build.
+    #[cfg(feature = "gui")]
+    if !cli.cli {
+        gui::run();
+        return Ok(());
     }
 
-    // 2. Load config (uses repo root for per-repo config when available)
-    let config = config::load_config(repo_info.as_ref().map(|r| r.root.as_path()))?;
+    // 1. Detect repo
+    let repo_info = git::detect_repo_info(".")
+        .context("not a git repository — run easy-diff from within a git repo")?;
+    tracing::info!(platform = %repo_info.platform, owner = %repo_info.owner,
+                   repo = %repo_info.repo, "detected repository");
+
+    // 2. Load config (uses repo root for per-repo config)
+    let config = config::load_config(Some(&repo_info.root))?;
 
     // 3. Verify account identity — fatal if detection fails
     let default_settings = config.llm.settings_for(&config.llm.default_provider);
@@ -91,21 +98,10 @@ async fn main() -> Result<()> {
         config.llm.default_provider
     );
 
-    // Launch GUI when requested or when no CLI-specific args are given.
-    #[cfg(feature = "gui")]
-    if cli.gui || (cli.pr.is_none() && !cli.analyze) {
-        gui::run();
-        return Ok(());
-    }
-
-    // CLI mode requires a git repo
-    let repo_info =
-        repo_info.context("not a git repository — run easy-diff from within a git repo")?;
-
     // 4. Create LLM dispatcher
     let dispatcher = Arc::new(llm::create_dispatcher(&config));
 
-    // 4. Create platform client (GitHub or BitBucket)
+    // 5. Create platform client (GitHub or BitBucket)
     let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .context("failed to initialize platform client")?;

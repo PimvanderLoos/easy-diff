@@ -63,7 +63,8 @@ pub fn build_pass1_prompt(
          }\n\n\
          Rules:\n\
          - Use only the change type and attention tag identifiers defined above.\n\
-         - `change_types` and `attention_tags` may be empty arrays if none apply.\n\
+         - `change_types` must contain at least one entry.\n\
+         - `attention_tags` must contain at least one entry. Use descriptive tags like `straightforward`, `well-tested`, or `clean-up` when no warning-level tags apply.\n\
          - Group files into clusters by logical concern, not directory structure.\n\
          - Every changed file must appear in exactly one cluster.\n\n",
     );
@@ -119,8 +120,9 @@ pub(crate) fn build_category_definitions() -> String {
 
     out.push_str("## Attention Tags\n\n");
     out.push_str(
-        "Flag areas that require special reviewer attention using one or more of \
-         the following tag identifiers:\n\n",
+        "Characterise each change using one or more of the following tags. \
+         Always assign at least one tag — use descriptive tags (`straightforward`, \
+         `well-tested`, `clean-up`) when no warning-level tags apply:\n\n",
     );
     for tag in AttentionTag::all() {
         out.push_str(&format!("- `{tag}`: {}\n", tag.description()));

@@ -3,11 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-if ! command -v cargo-tauri &>/dev/null; then
+if ! cargo tauri --version &>/dev/null; then
     echo "tauri-cli not found, installing..."
     cargo install tauri-cli
 fi
 
-cd frontend && npm install && cd ..
+(cd frontend && npm install)
 
-cargo tauri build --features gui
+cargo tauri build

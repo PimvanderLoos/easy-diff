@@ -104,7 +104,8 @@ pub fn build_pass2_prompt(file_path: &str, file_diff: &str, pass1_summary: &Pass
          }\n\n\
          Rules:\n\
          - Use only the change type and attention tag identifiers defined above.\n\
-         - `change_types` and `attention_tags` may be empty arrays if none apply.\n\
+         - `change_types` must contain at least one entry.\n\
+         - `attention_tags` must contain at least one entry. Use descriptive tags like `straightforward`, `well-tested`, or `clean-up` when no warning-level tags apply.\n\
          - `details` should list concrete, actionable observations about this file.\n\n",
     );
 

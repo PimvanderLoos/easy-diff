@@ -22,12 +22,12 @@ use platform::{create_platform_client, PullRequest};
 #[derive(Parser)]
 #[command(name = "easy-diff", about = "LLM-powered PR review tool", version)]
 struct Cli {
-    /// Launch the graphical user interface.
+    /// Force CLI mode even when compiled with the GUI feature.
     ///
     /// Only available when compiled with the `gui` feature.
     #[cfg(feature = "gui")]
     #[arg(long)]
-    gui: bool,
+    cli: bool,
 
     /// Fetch and display the diff for a specific PR number.
     ///
@@ -71,9 +71,10 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Launch GUI when requested (only available with the `gui` feature).
+    // When compiled with the GUI feature, launch the GUI by default.
+    // Use --cli to force CLI mode from a gui-enabled build.
     #[cfg(feature = "gui")]
-    if cli.gui {
+    if !cli.cli {
         gui::run();
         return Ok(());
     }

@@ -64,7 +64,10 @@
   let openSubmenu = $state<"category" | "tags" | null>(null);
 
   /** Local mutable tag selection (mirrors `currentTags` but can be toggled). */
-  let selectedTags = $state<string[]>([...currentTags]);
+  let selectedTags = $state<string[]>([]);
+  $effect(() => {
+    selectedTags = [...currentTags];
+  });
 
   function toggleTag(tagId: string) {
     selectedTags = selectedTags.includes(tagId)

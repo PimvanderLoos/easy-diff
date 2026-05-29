@@ -230,6 +230,18 @@ impl CacheStore {
         Ok(())
     }
 
+    /// Removes the viewed record for `(pr_id, file_path)`, if one exists.
+    ///
+    /// Used when a file is unmarked as reviewed. Succeeds as a no-op when no
+    /// record exists.
+    pub fn unmark_viewed(&self, pr_id: &str, file_path: &str) -> Result<(), CacheError> {
+        self.conn.execute(
+            "DELETE FROM viewed_files WHERE pr_id = ?1 AND file_path = ?2",
+            params![pr_id, file_path],
+        )?;
+        Ok(())
+    }
+
     /// Returns the head SHA at which `file_path` in PR `pr_id` was last viewed,
     /// or `None` if the file has never been marked as viewed.
     pub fn get_viewed_sha(
@@ -925,6 +937,32 @@ mod tests {
 
         // verify — second SHA wins
         assert_eq!(sha, Some("sha-new".to_owned()));
+    }
+
+    #[test]
+    fn unmark_viewed_removes_record() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store.mark_viewed("42", "src/auth.rs", "sha-abc").unwrap();
+
+        // execute
+        store.unmark_viewed("42", "src/auth.rs").unwrap();
+        let sha = store.get_viewed_sha("42", "src/auth.rs").unwrap();
+
+        // verify — record is gone
+        assert!(sha.is_none());
+    }
+
+    #[test]
+    fn unmark_viewed_is_noop_when_absent() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute — unmarking a never-viewed file must not error
+        let result = store.unmark_viewed("42", "src/never_viewed.rs");
+
+        // verify
+        assert!(result.is_ok());
     }
 
     #[test]

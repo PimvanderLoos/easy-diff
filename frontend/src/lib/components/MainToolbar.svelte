@@ -43,6 +43,8 @@
     draftCount?: number;
     /** Called when the user clicks "Submit review". */
     onSubmitReview?: () => void;
+    /** Called when the user clicks the keyboard-shortcuts button. */
+    onShowShortcuts?: () => void;
   }
 
   let {
@@ -54,6 +56,7 @@
     onNext,
     draftCount = 0,
     onSubmitReview,
+    onShowShortcuts,
   }: Props = $props();
 
   const atFirst = $derived(fileIndex <= 0);
@@ -124,7 +127,7 @@
         <circle cx="11" cy="7" r="1.2" fill="currentColor" />
       </svg>
     </IconBtn>
-    <IconBtn title="Keyboard shortcuts">
+    <IconBtn title="Keyboard shortcuts" onclick={onShowShortcuts}>
       <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
         <rect
           x="1"

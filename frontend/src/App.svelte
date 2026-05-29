@@ -16,7 +16,8 @@
   import TitleBar from "./lib/components/TitleBar.svelte";
   import PrSelectionScreen from "./lib/components/PrSelectionScreen.svelte";
   import ReviewScreen from "./lib/components/ReviewScreen.svelte";
-  import { currentScreen, selectedPr, theme } from "./lib/stores.js";
+  import KeyboardShortcutsDialog from "./lib/components/KeyboardShortcutsDialog.svelte";
+  import { currentScreen, selectedPr, theme, helpOpen } from "./lib/stores.js";
   import type { RepoInfo } from "./lib/types.js";
 
   // ── Theme ────────────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@
     username=""
     theme={$theme}
     onToggleTheme={toggleTheme}
+    onHelp={() => helpOpen.set(true)}
   />
 
   {#if $currentScreen === "selection"}
@@ -74,3 +76,7 @@
     <ReviewScreen />
   {/if}
 </div>
+
+{#if $helpOpen}
+  <KeyboardShortcutsDialog onClose={() => helpOpen.set(false)} />
+{/if}

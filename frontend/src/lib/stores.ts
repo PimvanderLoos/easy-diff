@@ -59,6 +59,9 @@ if (typeof window !== "undefined") {
 /** Which screen is currently shown. Defaults to the PR selection screen. */
 export const currentScreen = writable<Screen>("selection");
 
+/** Whether the keyboard-shortcuts help dialog is open. */
+export const helpOpen = writable<boolean>(false);
+
 /** The PR that was selected from the list. Null when on the selection screen. */
 export const selectedPr = writable<PullRequest | null>(null);
 

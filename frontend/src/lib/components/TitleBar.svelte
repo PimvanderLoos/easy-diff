@@ -22,6 +22,8 @@
     theme?: "light" | "dark";
     /** Called when the theme toggle button is clicked. */
     onToggleTheme?: () => void;
+    /** Called when the help (?) button is clicked. */
+    onHelp?: () => void;
   }
 
   let {
@@ -30,6 +32,7 @@
     username = "",
     theme = "light",
     onToggleTheme,
+    onHelp,
   }: Props = $props();
 
   const repoParts = $derived(repoPath ? repoPath.split("/") : []);
@@ -121,7 +124,9 @@
       class="flex items-center justify-center rounded-full text-ed-text-muted border border-ed-text-muted cursor-pointer bg-transparent"
       style="width: 20px; height: 20px; font-size: 11px; font-family: var(--font-sans);"
       aria-label="Help"
+      title="Keyboard shortcuts"
       type="button"
+      onclick={onHelp}
     >
       ?
     </button>

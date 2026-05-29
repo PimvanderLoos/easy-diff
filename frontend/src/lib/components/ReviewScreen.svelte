@@ -27,6 +27,7 @@
     diffViewMode,
     draftComments,
     categoryOverrides,
+    helpOpen,
   } from "../stores.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
@@ -492,6 +493,57 @@
     submitDialogOpen = true;
   }
 
+  // ── Global keyboard shortcuts ─────────────────────────────────────────────
+  // Documented in KeyboardShortcutsDialog — keep the two in sync.
+
+  /** True when a text-entry element is focused, so we should ignore shortcuts. */
+  function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      target.isContentEditable
+    );
+  }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // "?" opens help from anywhere (Shift is expected, other modifiers are not).
+    if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      helpOpen.set(true);
+      return;
+    }
+    // Skip the rest while typing, holding a modifier, or with a dialog open.
+    if (
+      isTypingTarget(e.target) ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey ||
+      submitDialogOpen ||
+      $helpOpen
+    ) {
+      return;
+    }
+    switch (e.key) {
+      case "j":
+        handleNext();
+        break;
+      case "k":
+        handlePrev();
+        break;
+      case "v":
+        diffViewMode.update((m) => (m === "inline" ? "split" : "inline"));
+        break;
+      case "s":
+        handleSubmitReviewClick();
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  }
+
   function handleDialogClose() {
     submitDialogOpen = false;
   }
@@ -523,6 +575,8 @@
     return () => observer.disconnect();
   });
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div
   class="flex-1 overflow-hidden"
@@ -565,6 +619,7 @@
       onNext={handleNext}
       {draftCount}
       onSubmitReview={handleSubmitReviewClick}
+      onShowShortcuts={() => helpOpen.set(true)}
     />
 
     <!-- Diff stack / loading / error states -->

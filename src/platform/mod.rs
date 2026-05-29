@@ -274,6 +274,10 @@ impl PlatformClient {
     }
 
     /// Returns the authenticated user (the reviewer) for this client.
+    ///
+    /// Only called from the `gui` feature-gated `get_current_user` command, so
+    /// it is dead code in non-`gui` builds.
+    #[allow(dead_code)]
     pub async fn current_user(&self) -> Result<CurrentUser, PlatformError> {
         match self {
             Self::Github(c) => c.current_user().await,

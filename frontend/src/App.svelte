@@ -7,8 +7,8 @@
    *   - "selection" → PrSelectionScreen
    *   - "review"    → ReviewPlaceholder
    *
-   * Theme (dark/light) is initialised from the OS preference and toggled
-   * by adding/removing the `dark` class on `<html>`.
+   * Theme (dark/light) is driven by the `theme` store (persisted choice or OS
+   * preference) and applied by adding/removing the `dark` class on `<html>`.
    */
 
   import { onMount } from "svelte";
@@ -16,20 +16,18 @@
   import TitleBar from "./lib/components/TitleBar.svelte";
   import PrSelectionScreen from "./lib/components/PrSelectionScreen.svelte";
   import ReviewScreen from "./lib/components/ReviewScreen.svelte";
-  import { currentScreen, selectedPr } from "./lib/stores.js";
+  import { currentScreen, selectedPr, theme } from "./lib/stores.js";
   import type { RepoInfo } from "./lib/types.js";
 
   // ── Theme ────────────────────────────────────────────────────────────────
 
-  let isDark = $state(
-    typeof window !== "undefined"
-      ? window.matchMedia("(prefers-color-scheme: dark)").matches
-      : false,
-  );
-
   $effect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("dark", $theme === "dark");
   });
+
+  function toggleTheme() {
+    theme.update((t) => (t === "dark" ? "light" : "dark"));
+  }
 
   // ── Repo info (fetched once on mount) ───────────────────────────────────
 
@@ -62,7 +60,13 @@
   class="flex flex-col bg-ed-bg text-ed-text font-sans"
   style="height: 100vh; overflow: hidden;"
 >
-  <TitleBar {repoPath} {breadcrumb} username="" />
+  <TitleBar
+    {repoPath}
+    {breadcrumb}
+    username=""
+    theme={$theme}
+    onToggleTheme={toggleTheme}
+  />
 
   {#if $currentScreen === "selection"}
     <PrSelectionScreen {repoInfo} />

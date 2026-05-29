@@ -24,6 +24,38 @@ import type {
 /** The active top-level screen. */
 export type Screen = "selection" | "review";
 
+/** Light or dark UI theme. */
+export type Theme = "light" | "dark";
+
+/** Storage key for the persisted theme choice. */
+const THEME_STORAGE_KEY = "ed-theme";
+
+/**
+ * Resolve the initial theme: a previously persisted choice, falling back to the
+ * OS `prefers-color-scheme` preference, then light.
+ */
+function initialTheme(): Theme {
+  if (typeof window === "undefined") return "light";
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+/**
+ * Active UI theme. Initialised from localStorage (falling back to the OS
+ * preference) and persisted on every change. `App.svelte` applies it by
+ * toggling the `dark` class on `<html>`.
+ */
+export const theme = writable<Theme>(initialTheme());
+
+if (typeof window !== "undefined") {
+  theme.subscribe((value) => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, value);
+  });
+}
+
 /** Which screen is currently shown. Defaults to the PR selection screen. */
 export const currentScreen = writable<Screen>("selection");
 

@@ -2,10 +2,10 @@
   /**
    * Collapsible card for a single file in the review screen.
    *
-   * When expanded: shows all hunks via HunkSection.
-   * When collapsed: shows only the FileHeader + FileTagRow summary.
+   * Always shows the FileHeader + FileTagRow summary (hunk count + attention
+   * tags). When expanded, additionally shows all hunks via HunkSection.
    *
-   * Aggregates all attention tags across the file's hunks so the collapsed
+   * Aggregates all attention tags across the file's hunks so the summary
    * row can display them without expanding.
    *
    * @example
@@ -146,9 +146,9 @@
     onToggleReviewed={onToggleReviewed}
   />
 
-  {#if collapsed}
-    <FileTagRow tags={fileTags()} hunkCount={hunks.length} />
-  {:else}
+  <FileTagRow tags={fileTags()} hunkCount={hunks.length} />
+
+  {#if !collapsed}
     {#each hunks as hunk, i (hunk.id)}
       <HunkSection
         {hunk}

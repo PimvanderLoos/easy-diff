@@ -22,7 +22,7 @@
     selectedPr,
     filterState,
     reviewedFiles,
-    collapsedFiles,
+    expandedFiles,
     focusedHunkId,
     diffViewMode,
     draftComments,
@@ -311,7 +311,7 @@
   // ── Review tracking ───────────────────────────────────────────────────────
 
   const reviewedSet = $derived($reviewedFiles);
-  const collapsedSet = $derived($collapsedFiles);
+  const expandedSet = $derived($expandedFiles);
 
   function toggleReviewed(path: string) {
     reviewedFiles.update((prev) => {
@@ -320,22 +320,22 @@
       if (willBeReviewed) {
         next.add(path);
         // Auto-collapse when marked reviewed.
-        collapsedFiles.update((cs) => new Set([...cs, path]));
+        expandedFiles.update((es) => {
+          const nes = new Set(es);
+          nes.delete(path);
+          return nes;
+        });
       } else {
         next.delete(path);
         // Re-expand when un-reviewed.
-        collapsedFiles.update((cs) => {
-          const ncs = new Set(cs);
-          ncs.delete(path);
-          return ncs;
-        });
+        expandedFiles.update((es) => new Set([...es, path]));
       }
       return next;
     });
   }
 
-  function toggleCollapsed(path: string) {
-    collapsedFiles.update((prev) => {
+  function toggleExpanded(path: string) {
+    expandedFiles.update((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
@@ -620,10 +620,10 @@
             hunks={hunks[file.path] ?? []}
             classifications={classifications}
             reviewed={reviewedSet.has(file.path)}
-            collapsed={collapsedSet.has(file.path)}
+            collapsed={!expandedSet.has(file.path)}
             focusedHunkId={currentFocusedHunkId}
             onToggleReviewed={() => toggleReviewed(file.path)}
-            onToggleCollapsed={() => toggleCollapsed(file.path)}
+            onToggleCollapsed={() => toggleExpanded(file.path)}
             onFocusHunk={handleFocusHunk}
             {isDark}
             {filter}

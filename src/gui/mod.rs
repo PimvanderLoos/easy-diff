@@ -121,12 +121,18 @@ async fn run_analysis(pr_number: u64) -> Result<AnalysisResult, String> {
             .map_err(|e| e.to_string())?;
 
         rt.block_on(async move {
+            // Persist analysis to the same cache the CLI and `get_analysis` use, so
+            // reopening the PR is a cache hit instead of a fresh re-analysis. The
+            // !Send `CacheStore` stays on this blocking thread and never crosses an
+            // `.await` on the Send side, so the original Send constraint still holds.
+            let cache =
+                CacheStore::open(root.join(".easy-diff").join("cache").join("analysis.db")).ok();
             let engine = AnalysisEngine::new(
                 dispatcher,
                 prefs.large_pr_threshold,
                 5,
                 prefs.max_file_context,
-                None, // no cache — GUI returns result directly
+                cache,
                 false,
                 root,
             );
@@ -382,6 +388,49 @@ fn get_category_overrides(pr_id: String) -> Result<Vec<CategoryOverride>, String
     cache.get_overrides(&pr_id).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Reviewed-state Tauri commands
+// ---------------------------------------------------------------------------
+
+/// Persists whether `file_path` in PR `pr_id` is marked reviewed at `head_sha`.
+///
+/// Reviewed state reuses the SHA-aware `viewed_files` table: marking reviewed
+/// records the current head SHA, so the file reverts to unreviewed once the PR
+/// gains new commits. Unmarking deletes the record.
+#[tauri::command]
+fn set_reviewed(
+    pr_id: String,
+    file_path: String,
+    head_sha: String,
+    reviewed: bool,
+) -> Result<(), String> {
+    let cache = open_cache()?;
+    if reviewed {
+        cache
+            .mark_viewed(&pr_id, &file_path, &head_sha)
+            .map_err(|e| e.to_string())
+    } else {
+        cache
+            .unmark_viewed(&pr_id, &file_path)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Returns the file paths in PR `pr_id` that are marked reviewed at `head_sha`.
+///
+/// Files reviewed at a different (older) head SHA are excluded, so the result
+/// reflects only the changes the user has reviewed at the current revision.
+#[tauri::command]
+fn get_reviewed_files(pr_id: String, head_sha: String) -> Result<Vec<String>, String> {
+    let cache = open_cache()?;
+    let viewed = cache.list_viewed(&pr_id).map_err(|e| e.to_string())?;
+    Ok(viewed
+        .into_iter()
+        .filter(|(_, sha)| sha == &head_sha)
+        .map(|(path, _)| path)
+        .collect())
+}
+
 /// Submits the accumulated draft comments as a GitHub pull request review.
 ///
 /// Steps:
@@ -556,6 +605,8 @@ pub fn run() {
             delete_comment,
             set_category_override,
             get_category_overrides,
+            set_reviewed,
+            get_reviewed_files,
             submit_review,
         ])
         .run(tauri::generate_context!())

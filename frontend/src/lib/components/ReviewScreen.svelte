@@ -148,6 +148,17 @@
     } catch {
       // No overrides yet; ignore.
     }
+
+    // Restore persisted reviewed-file state (files reviewed at the current head SHA).
+    try {
+      const reviewed = await invoke<string[]>("get_reviewed_files", {
+        prId,
+        headSha: pr.head_sha,
+      });
+      reviewedFiles.set(new Set(reviewed));
+    } catch {
+      // No reviewed state yet; ignore.
+    }
   });
 
   // ── Convert raw diff into frontend HunkData ───────────────────────────────
@@ -314,9 +325,22 @@
   const collapsedSet = $derived($collapsedFiles);
 
   function toggleReviewed(path: string) {
+    const willBeReviewed = !reviewedSet.has(path);
+
+    // Persist reviewed state (fire-and-forget), keyed to the current head SHA so
+    // it survives reopening the PR. Failure is non-fatal — in-memory state below
+    // still updates.
+    if (pr) {
+      invoke("set_reviewed", {
+        prId: String(pr.number),
+        filePath: path,
+        headSha: pr.head_sha,
+        reviewed: willBeReviewed,
+      }).catch(() => {});
+    }
+
     reviewedFiles.update((prev) => {
       const next = new Set(prev);
-      const willBeReviewed = !next.has(path);
       if (willBeReviewed) {
         next.add(path);
         // Auto-collapse when marked reviewed.

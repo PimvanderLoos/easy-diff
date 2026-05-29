@@ -267,6 +267,20 @@
   the unified client. `submit_review` returns `Unsupported` error for BitBucket.
   PR #36 on GitHub.
 
+- **Post-MVP: Profile config + account logging**: Wired the `profile` config
+  field through `ProviderSettings` and `merge_provider_config` — previously
+  parsed in `RawProviderConfig` but silently discarded. Each provider now
+  accepts `command` (custom binary path, was also discarded) and `profile`
+  (alternate config directory). Profile is mapped to provider-specific env
+  vars on subprocess spawn: Claude → `CLAUDE_CONFIG_DIR`, Codex → `CODEX_HOME`,
+  Gemini → `GEMINI_CLI_HOME`. `run_subprocess` gained an `envs` parameter.
+  Account detection runs at startup and is **fatal** — prevents accidentally
+  using the wrong account. Detection: Claude reads `.claude.json`, Codex runs
+  `codex login status`, Gemini reads `google_accounts.json`. `LlmConfig::settings_for()`
+  helper added. 12 new tests (185 total). Files: `src/config/mod.rs`,
+  `src/llm/mod.rs`, `src/llm/claude.rs`, `src/llm/codex.rs`, `src/llm/gemini.rs`,
+  `src/llm/account.rs` (new), `src/main.rs`.
+
 ## In Progress
 (none)
 

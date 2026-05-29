@@ -32,7 +32,7 @@
   let { comment, onUpdated, onDeleted }: Props = $props();
 
   let editing = $state(false);
-  let editBody = $state(comment.body);
+  let editBody = $state("");
   let saving = $state(false);
   let deleting = $state(false);
   let saveError = $state<string | null>(null);

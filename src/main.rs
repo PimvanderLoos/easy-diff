@@ -23,12 +23,12 @@ use platform::{create_platform_client, PullRequest};
 #[derive(Parser)]
 #[command(name = "easy-diff", about = "LLM-powered PR review tool", version)]
 struct Cli {
-    /// Launch the graphical user interface.
+    /// Force CLI mode even when compiled with the GUI feature.
     ///
     /// Only available when compiled with the `gui` feature.
     #[cfg(feature = "gui")]
     #[arg(long)]
-    gui: bool,
+    cli: bool,
 
     /// Fetch and display the diff for a specific PR number.
     ///
@@ -74,9 +74,10 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Launch GUI when requested (only available with the `gui` feature).
+    // When compiled with the GUI feature, launch the GUI by default.
+    // Use --cli to force CLI mode from a gui-enabled build.
     #[cfg(feature = "gui")]
-    if cli.gui {
+    if !cli.cli {
         gui::run();
         return Ok(());
     }
@@ -90,11 +91,20 @@ async fn main() -> Result<()> {
     // 2. Load config (uses repo root for per-repo config)
     let config = config::load_config(Some(&repo_info.root))?;
 
-    // 3. Create LLM dispatcher
-    let dispatcher = Arc::new(llm::create_dispatcher(&config));
-    tracing::info!(provider = dispatcher.provider_name(), "LLM provider ready");
+    // 3. Verify account identity — fatal if detection fails
+    let default_settings = config.llm.settings_for(&config.llm.default_provider);
+    let account = llm::account::detect_account(&config.llm.default_provider, default_settings)
+        .await
+        .context("failed to detect LLM account — check your provider config and authentication")?;
+    println!(
+        "[easy-diff] {:?} account: {account}",
+        config.llm.default_provider
+    );
 
-    // 4. Create platform client (GitHub or BitBucket)
+    // 4. Create LLM dispatcher
+    let dispatcher = Arc::new(llm::create_dispatcher(&config));
+
+    // 5. Create platform client (GitHub or BitBucket)
     let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
         .await
         .context("failed to initialize platform client")?;

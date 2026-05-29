@@ -19,6 +19,7 @@
 //! // let value = dispatcher.analyze("prompt", &schema).await?;
 //! ```
 
+pub mod account;
 pub mod claude;
 pub mod codex;
 pub mod debug;
@@ -157,15 +158,30 @@ fn provider_from_config(
 ) -> AnyProvider {
     match provider {
         crate::config::Provider::Claude => {
-            AnyProvider::Claude(claude::ClaudeProvider::new(llm.claude.model.clone()))
+            let s = &llm.claude;
+            AnyProvider::Claude(claude::ClaudeProvider::new(
+                s.command.clone(),
+                s.profile.clone(),
+                s.model.clone(),
+            ))
         }
         crate::config::Provider::Codex => {
-            AnyProvider::Codex(codex::CodexProvider::new(llm.codex.model.clone()))
+            let s = &llm.codex;
+            AnyProvider::Codex(codex::CodexProvider::new(
+                s.command.clone(),
+                s.profile.clone(),
+                s.model.clone(),
+            ))
         }
-        crate::config::Provider::Gemini => AnyProvider::Gemini(gemini::GeminiProvider::new(
-            llm.gemini.model.clone(),
-            llm.max_retries,
-        )),
+        crate::config::Provider::Gemini => {
+            let s = &llm.gemini;
+            AnyProvider::Gemini(gemini::GeminiProvider::new(
+                s.command.clone(),
+                s.profile.clone(),
+                s.model.clone(),
+                llm.max_retries,
+            ))
+        }
     }
 }
 
@@ -176,11 +192,13 @@ pub(crate) async fn run_subprocess(
     program: &str,
     args: &[&str],
     input: &str,
+    envs: &[(&str, &str)],
 ) -> Result<String, LlmError> {
     use tokio::io::AsyncWriteExt as _;
 
     let mut child = tokio::process::Command::new(program)
         .args(args)
+        .envs(envs.iter().copied())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

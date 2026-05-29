@@ -3,7 +3,7 @@
    * Main toolbar for the review screen diff area.
    *
    * Three groups:
-   * - Left: PillSelect controls (batch, unreviewed filter).
+   * - Left: (empty for now).
    * - Center: file navigation (prev / next arrow buttons + "N of M" counter).
    * - Right: SegToggle (Unified / Split), overflow menu, keyboard-shortcuts
    *   button, and the Submit-review button.
@@ -23,7 +23,6 @@
    * ```
    */
 
-  import PillSelect from "./PillSelect.svelte";
   import SegToggle from "./SegToggle.svelte";
   import IconBtn from "./IconBtn.svelte";
 
@@ -73,10 +72,8 @@
     gap: 14px;
   "
 >
-  <!-- Left: pill selectors -->
-  <div style="display: flex; align-items: center; gap: 8px;">
-    <PillSelect value="Unre…" />
-  </div>
+  <!-- Left: empty spacer keeps the center file-nav balanced via space-between -->
+  <div style="display: flex; align-items: center;"></div>
 
   <!-- Center: file navigation -->
   <div style="display: flex; align-items: center; gap: 10px;">

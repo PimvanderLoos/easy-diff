@@ -61,6 +61,15 @@ pub struct PullRequest {
     pub updated_at: String,
 }
 
+/// The authenticated user on the hosting platform (i.e. the reviewer).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CurrentUser {
+    /// Login / username on the platform.
+    pub login: String,
+    /// URL of the user's avatar image, when the platform exposes one.
+    pub avatar_url: Option<String>,
+}
+
 /// The raw unified diff for a pull request.
 #[derive(Debug, Clone)]
 pub struct PullRequestDiff {
@@ -129,6 +138,9 @@ pub trait GithubOperations {
         pr_number: u64,
     ) -> Result<PullRequestDiff, PlatformError>;
 
+    /// Fetches the authenticated user (the reviewer) for this client.
+    async fn current_user(&self) -> Result<CurrentUser, PlatformError>;
+
     /// Submits a review (with optional inline comments) to a pull request.
     ///
     /// `event` controls whether the review approves, requests changes, or is a
@@ -172,6 +184,9 @@ pub trait BitbucketOperations {
         repo_slug: &str,
         pr_id: u64,
     ) -> Result<PullRequestDiff, PlatformError>;
+
+    /// Returns the authenticated user (the reviewer) for this client.
+    async fn current_user(&self) -> Result<CurrentUser, PlatformError>;
 }
 
 /// Errors from platform API calls.
@@ -255,6 +270,14 @@ impl PlatformClient {
                 c.get_pull_request_diff(owner_or_workspace, repo, pr_number)
                     .await
             }
+        }
+    }
+
+    /// Returns the authenticated user (the reviewer) for this client.
+    pub async fn current_user(&self) -> Result<CurrentUser, PlatformError> {
+        match self {
+            Self::Github(c) => c.current_user().await,
+            Self::Bitbucket(c) => c.current_user().await,
         }
     }
 

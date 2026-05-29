@@ -54,6 +54,19 @@ export interface RepoInfo {
   remote_url: string;
 }
 
+/**
+ * The authenticated platform user (the reviewer).
+ *
+ * Mirrors `src/platform/mod.rs` → `CurrentUser`, returned by the
+ * `get_current_user` Tauri command.
+ */
+export interface CurrentUser {
+  /** Login / username on the platform. */
+  login: string;
+  /** URL of the user's avatar image, when the platform exposes one. */
+  avatar_url: string | null;
+}
+
 // ── Analysis / diff types ──────────────────────────────────────────────────
 
 /**

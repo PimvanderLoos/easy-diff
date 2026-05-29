@@ -20,7 +20,9 @@ use crate::config::{self, Provider};
 use crate::diff::{parse_diff, DiffFile};
 use crate::git;
 use crate::llm::schema::Pass1Output;
-use crate::platform::{create_platform_client, PullRequest, ReviewCommentPayload, ReviewEvent};
+use crate::platform::{
+    create_platform_client, CurrentUser, PullRequest, ReviewCommentPayload, ReviewEvent,
+};
 
 // ---------------------------------------------------------------------------
 // Serialisable DTOs for Tauri IPC
@@ -67,6 +69,20 @@ async fn list_pull_requests() -> Result<Vec<PullRequest>, String> {
 #[tauri::command]
 async fn get_repo_info() -> Result<git::RepoInfo, String> {
     git::detect_repo_info(".").map_err(|e| e.to_string())
+}
+
+/// Returns the authenticated platform user (the reviewer) for the current repo.
+///
+/// Used by the title bar to show the reviewer's avatar. Returns a human-readable
+/// error string when the repo can't be detected or the platform call fails.
+#[tauri::command]
+async fn get_current_user() -> Result<CurrentUser, String> {
+    let repo_info = git::detect_repo_info(".").map_err(|e| e.to_string())?;
+    let config = config::load_config(Some(&repo_info.root)).map_err(|e| e.to_string())?;
+    let client = create_platform_client(repo_info.platform, &config, &repo_info.host)
+        .await
+        .map_err(|e| e.to_string())?;
+    client.current_user().await.map_err(|e| e.to_string())
 }
 
 /// Returns the resolved configuration, omitting secrets.
@@ -545,6 +561,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_pull_requests,
             get_repo_info,
+            get_current_user,
             get_config,
             run_analysis,
             get_analysis,

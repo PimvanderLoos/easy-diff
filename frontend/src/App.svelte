@@ -18,7 +18,7 @@
   import ReviewScreen from "./lib/components/ReviewScreen.svelte";
   import KeyboardShortcutsDialog from "./lib/components/KeyboardShortcutsDialog.svelte";
   import { currentScreen, selectedPr, theme, helpOpen } from "./lib/stores.js";
-  import type { RepoInfo } from "./lib/types.js";
+  import type { RepoInfo, CurrentUser } from "./lib/types.js";
 
   // ── Theme ────────────────────────────────────────────────────────────────
 
@@ -34,11 +34,20 @@
 
   let repoInfo = $state<RepoInfo | null>(null);
 
+  // ── Reviewing account (fetched once on mount) ────────────────────────────
+
+  let currentUser = $state<CurrentUser | null>(null);
+
   onMount(async () => {
     try {
       repoInfo = await invoke<RepoInfo>("get_repo_info");
     } catch {
       // Non-fatal: breadcrumb stays empty when not in a git repo.
+    }
+    try {
+      currentUser = await invoke<CurrentUser>("get_current_user");
+    } catch {
+      // Non-fatal: avatar stays as a placeholder when the user can't be resolved.
     }
   });
 
@@ -64,7 +73,8 @@
   <TitleBar
     {repoPath}
     {breadcrumb}
-    username=""
+    username={currentUser?.login ?? ""}
+    avatarUrl={currentUser?.avatar_url ?? undefined}
     theme={$theme}
     onToggleTheme={toggleTheme}
     onHelp={() => helpOpen.set(true)}

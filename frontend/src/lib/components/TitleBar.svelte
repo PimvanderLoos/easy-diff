@@ -18,6 +18,8 @@
     breadcrumb?: string;
     /** Username shown in the avatar (initials derived from it). */
     username?: string;
+    /** Optional avatar image URL (e.g. the reviewer's GitHub profile picture). */
+    avatarUrl?: string;
     /** Active UI theme, used to pick the toggle icon. */
     theme?: "light" | "dark";
     /** Called when the theme toggle button is clicked. */
@@ -30,6 +32,7 @@
     repoPath = "",
     breadcrumb = "all pull requests",
     username = "",
+    avatarUrl,
     theme = "light",
     onToggleTheme,
     onHelp,
@@ -131,7 +134,7 @@
       ?
     </button>
     {#if username}
-      <Avatar name={username} size={26} />
+      <Avatar name={username} size={26} imageUrl={avatarUrl} />
     {:else}
       <!-- Placeholder circle when no user info available -->
       <span

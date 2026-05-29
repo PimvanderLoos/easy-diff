@@ -75,7 +75,6 @@
 >
   <!-- Left: pill selectors -->
   <div style="display: flex; align-items: center; gap: 8px;">
-    <PillSelect label="Batch" value="1 file" />
     <PillSelect value="Unre…" />
   </div>
 

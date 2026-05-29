@@ -56,9 +56,23 @@ impl LlmProvider for ClaudeProvider {
 /// When invoked with `--output-format json`, the CLI wraps the model output in
 /// an envelope with metadata fields (`is_error`, `modelUsage`, `session_id`, etc.).
 /// The actual model response lives in the `"result"` field as an escaped JSON string.
+///
+/// If the envelope reports `is_error: true`, the `"result"` field holds a
+/// human-readable error message rather than JSON; this returns a clear
+/// [`LlmError::InvalidJson`] instead of letting the message fail to parse downstream.
 /// If the parsed value doesn't look like an envelope (no `"result"` string field),
 /// it's returned as-is (the model may have output raw JSON directly).
 fn unwrap_claude_envelope(value: serde_json::Value) -> Result<serde_json::Value, LlmError> {
+    if value.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+        let message = value
+            .get("result")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
+        return Err(LlmError::InvalidJson {
+            message: format!("claude CLI reported an error: {message}"),
+        });
+    }
+
     if let Some(result_str) = value.get("result").and_then(|v| v.as_str()) {
         extract_json(result_str)
     } else {
@@ -128,5 +142,35 @@ mod tests {
 
         // verify
         assert_eq!(extracted["summary"], "direct output");
+    }
+
+    #[test]
+    fn unwrap_envelope_extracts_fenced_result() {
+        // setup
+        let envelope = serde_json::json!({
+            "is_error": false,
+            "result": "```json\n{\"k\":1}\n```"
+        });
+
+        // execute
+        let extracted = unwrap_claude_envelope(envelope).unwrap();
+
+        // verify
+        assert_eq!(extracted, serde_json::json!({"k": 1}));
+    }
+
+    #[test]
+    fn unwrap_envelope_fails_when_is_error() {
+        // setup
+        let envelope = serde_json::json!({
+            "is_error": true,
+            "result": "rate limit exceeded"
+        });
+
+        // execute
+        let result = unwrap_claude_envelope(envelope);
+
+        // verify
+        assert!(matches!(result, Err(LlmError::InvalidJson { .. })));
     }
 }

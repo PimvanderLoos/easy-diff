@@ -556,43 +556,16 @@
       background: var(--ed-panel);
     "
   >
-    <div style="position: relative;">
-      <MainToolbar
-        fileIndex={activeFileIndex}
-        totalFiles={files.length}
-        {diffView}
-        onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
-        onPrev={handlePrev}
-        onNext={handleNext}
-      />
-      <!-- Submit review button pinned to the right of the toolbar row -->
-      <div
-        style="
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-        "
-      >
-        <button
-          onclick={handleSubmitReviewClick}
-          style="
-            background: var(--ed-accent);
-            border: none;
-            border-radius: 6px;
-            color: #fff;
-            cursor: pointer;
-            font-family: var(--font-sans);
-            font-size: 12px;
-            font-weight: 500;
-            padding: 5px 12px;
-            white-space: nowrap;
-          "
-        >
-          Submit review{draftCount > 0 ? ` (${draftCount})` : ""}
-        </button>
-      </div>
-    </div>
+    <MainToolbar
+      fileIndex={activeFileIndex}
+      totalFiles={files.length}
+      {diffView}
+      onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
+      onPrev={handlePrev}
+      onNext={handleNext}
+      {draftCount}
+      onSubmitReview={handleSubmitReviewClick}
+    />
 
     <!-- Diff stack / loading / error states -->
     <div

@@ -5,7 +5,8 @@
    * Three groups:
    * - Left: PillSelect controls (batch, unreviewed filter).
    * - Center: file navigation (prev / next arrow buttons + "N of M" counter).
-   * - Right: SegToggle (Unified / Split), overflow menu, keyboard-shortcuts button.
+   * - Right: SegToggle (Unified / Split), overflow menu, keyboard-shortcuts
+   *   button, and the Submit-review button.
    *
    * Translates `BMainToolbar` from `concept-b.jsx` to Svelte.
    *
@@ -39,6 +40,10 @@
     onPrev?: () => void;
     /** Called when the user clicks "next file". */
     onNext?: () => void;
+    /** Number of draft comments, shown in the Submit-review button label. */
+    draftCount?: number;
+    /** Called when the user clicks "Submit review". */
+    onSubmitReview?: () => void;
   }
 
   let {
@@ -48,6 +53,8 @@
     onDiffViewChange,
     onPrev,
     onNext,
+    draftCount = 0,
+    onSubmitReview,
   }: Props = $props();
 
   const atFirst = $derived(fileIndex <= 0);
@@ -141,5 +148,22 @@
         />
       </svg>
     </IconBtn>
+    <button
+      onclick={onSubmitReview}
+      style="
+        background: var(--ed-accent);
+        border: none;
+        border-radius: 6px;
+        color: #fff;
+        cursor: pointer;
+        font-family: var(--font-sans);
+        font-size: 12px;
+        font-weight: 500;
+        padding: 5px 12px;
+        white-space: nowrap;
+      "
+    >
+      Submit review{draftCount > 0 ? ` (${draftCount})` : ""}
+    </button>
   </div>
 </div>

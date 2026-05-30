@@ -34,7 +34,9 @@ impl LlmProvider for CodexProvider {
         prompt: &str,
         _schema: &serde_json::Value,
     ) -> Result<serde_json::Value, LlmError> {
-        let mut args = vec!["--quiet"];
+        // Without an explicit format flag the CLI prints prose, which breaks
+        // `extract_json`. Request JSON output so parsing succeeds.
+        let mut args = vec!["--quiet", "--output-format", "json"];
         let model_flag;
         if let Some(model) = &self.model {
             model_flag = model.clone();

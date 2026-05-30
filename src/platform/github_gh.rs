@@ -276,14 +276,13 @@ struct GhPullRequest {
     created_at: String,
     #[serde(rename = "updatedAt")]
     updated_at: String,
-    // Change stats. `#[serde(default)]` so the single-PR `pr view` path (which
-    // doesn't request these fields) and existing fixtures still deserialize.
-    #[serde(default)]
-    additions: u64,
-    #[serde(default)]
-    deletions: u64,
-    #[serde(default, rename = "changedFiles")]
-    changed_files: u64,
+    // Change stats. Optional so the single-PR `pr view` path (which doesn't
+    // request these fields) leaves them `None` rather than a misleading `0`;
+    // serde maps an omitted `Option` field to `None`.
+    additions: Option<u64>,
+    deletions: Option<u64>,
+    #[serde(rename = "changedFiles")]
+    changed_files: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,9 +302,9 @@ impl From<GhPullRequest> for PullRequest {
             head_sha: pr.head_ref_oid,
             created_at: pr.created_at,
             updated_at: pr.updated_at,
-            changed_files: Some(pr.changed_files),
-            additions: Some(pr.additions),
-            deletions: Some(pr.deletions),
+            changed_files: pr.changed_files,
+            additions: pr.additions,
+            deletions: pr.deletions,
         }
     }
 }
@@ -324,7 +323,10 @@ mod tests {
             "headRefOid": "abc1234567890",
             "baseRefOid": "def5678901234",
             "createdAt": "2024-01-15T10:00:00Z",
-            "updatedAt": "2024-01-15T12:00:00Z"
+            "updatedAt": "2024-01-15T12:00:00Z",
+            "additions": 340,
+            "deletions": 58,
+            "changedFiles": 12
         },
         {
             "number": 43,
@@ -366,7 +368,15 @@ mod tests {
         assert_eq!(prs[0].base_ref_name, "main");
         assert_eq!(prs[0].head_ref_oid, "abc1234567890");
         assert_eq!(prs[0].base_ref_oid, "def5678901234");
+        // Stats are parsed when present (guards the `changedFiles` rename)...
+        assert_eq!(prs[0].additions, Some(340));
+        assert_eq!(prs[0].deletions, Some(58));
+        assert_eq!(prs[0].changed_files, Some(12));
         assert_eq!(prs[1].number, 43);
+        // ...and stay None when omitted.
+        assert_eq!(prs[1].additions, None);
+        assert_eq!(prs[1].deletions, None);
+        assert_eq!(prs[1].changed_files, None);
     }
 
     #[test]
@@ -400,6 +410,11 @@ mod tests {
         assert_eq!(pr.head_sha, "abc1234567890");
         assert_eq!(pr.created_at, "2024-01-15T10:00:00Z");
         assert_eq!(pr.updated_at, "2024-01-15T12:00:00Z");
+        // `gh pr view` doesn't request stats, so they convert to None (unknown),
+        // not Some(0).
+        assert_eq!(pr.changed_files, None);
+        assert_eq!(pr.additions, None);
+        assert_eq!(pr.deletions, None);
     }
 
     #[test]

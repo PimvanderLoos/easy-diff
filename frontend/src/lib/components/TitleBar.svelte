@@ -95,8 +95,8 @@
     <button
       class="flex items-center justify-center rounded-full text-ed-text-muted cursor-pointer bg-transparent border-none"
       style="width: 22px; height: 22px;"
-      aria-label="Toggle dark mode"
-      title="Toggle dark mode"
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       type="button"
       onclick={onToggleTheme}
     >

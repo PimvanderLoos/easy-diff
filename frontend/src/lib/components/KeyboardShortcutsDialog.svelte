@@ -38,6 +38,9 @@
   }
 </script>
 
+<!-- Esc closes regardless of where focus is (opener button stays focused). -->
+<svelte:window onkeydown={handleKeydown} />
+
 <!-- Modal backdrop -->
 <div
   class="fixed inset-0 z-50 flex items-center justify-center"

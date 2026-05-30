@@ -509,12 +509,7 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    // "?" opens help from anywhere (Shift is expected, other modifiers are not).
-    if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      helpOpen.set(true);
-      return;
-    }
-    // Skip the rest while typing, holding a modifier, or with a dialog open.
+    // Skip shortcuts while typing, holding a modifier, or with a dialog open.
     if (
       isTypingTarget(e.target) ||
       e.ctrlKey ||
@@ -537,6 +532,9 @@
         break;
       case "s":
         handleSubmitReviewClick();
+        break;
+      case "?":
+        helpOpen.set(true);
         break;
       default:
         return;

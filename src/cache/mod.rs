@@ -188,6 +188,10 @@ impl CacheStore {
                 viewed_at TEXT NOT NULL,
                 PRIMARY KEY (pr_id, file_path)
             );
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS review_comments (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 pr_id      TEXT    NOT NULL,
@@ -207,6 +211,23 @@ impl CacheStore {
                 attention_tags TEXT,
                 UNIQUE(pr_id, file_path, hunk_id)
             );",
+        )?;
+        Ok(())
+    }
+
+    /// Records that the cache was opened this session by upserting
+    /// `last_opened_at` (current UTC timestamp) and `app_version` into the
+    /// `meta` table.
+    ///
+    /// The write also serves as a writability probe: call it right after
+    /// [`CacheStore::open`] to confirm the database can actually be written to,
+    /// not merely opened.
+    pub fn record_open(&self) -> Result<(), CacheError> {
+        let now = chrono_now();
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('last_opened_at', ?1), ('app_version', ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![now, env!("CARGO_PKG_VERSION")],
         )?;
         Ok(())
     }
@@ -992,6 +1013,52 @@ mod tests {
         assert_eq!(viewed.len(), 2);
         assert_eq!(viewed[0], ("src/a.rs".to_owned(), "sha-a".to_owned()));
         assert_eq!(viewed[1], ("src/b.rs".to_owned(), "sha-b".to_owned()));
+    }
+
+    #[test]
+    fn record_open_writes_meta() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute
+        store.record_open().unwrap();
+
+        // verify — app_version matches the crate version; last_opened recorded
+        let version: String = store
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'app_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
+        let opened: String = store
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'last_opened_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!opened.is_empty());
+    }
+
+    #[test]
+    fn record_open_upserts_single_row_per_key() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute — call twice; must upsert, not duplicate rows
+        store.record_open().unwrap();
+        store.record_open().unwrap();
+
+        // verify — exactly one row per key (last_opened_at + app_version)
+        let count: i64 = store
+            .conn
+            .query_row("SELECT count(*) FROM meta", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]

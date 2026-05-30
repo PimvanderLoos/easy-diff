@@ -27,6 +27,7 @@ jsonschema = "0.46.5"
 dialoguer = "0.11"
 atty = "0.2"
 tauri = { version = "2.11.2", optional = true }
+rfd = { version = "0.17.2", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }
@@ -35,4 +36,4 @@ tauri-build = { version = "2", optional = true }
 tempfile = "3"
 
 [features]
-gui = ["dep:tauri", "dep:tauri-build"]
+gui = ["dep:tauri", "dep:tauri-build", "dep:rfd"]

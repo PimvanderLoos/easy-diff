@@ -125,8 +125,14 @@ async fn run_analysis(pr_number: u64) -> Result<AnalysisResult, String> {
             // reopening the PR is a cache hit instead of a fresh re-analysis. The
             // !Send `CacheStore` stays on this blocking thread and never crosses an
             // `.await` on the Send side, so the original Send constraint still holds.
-            let cache =
-                CacheStore::open(root.join(".easy-diff").join("cache").join("analysis.db")).ok();
+            let db_path = root.join(".easy-diff").join("cache").join("analysis.db");
+            let cache = match CacheStore::open(&db_path) {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    warn_cache_unwritable(&db_path, &e);
+                    None
+                }
+            };
             let engine = AnalysisEngine::new(
                 dispatcher,
                 prefs.large_pr_threshold,
@@ -295,6 +301,25 @@ fn open_cache() -> Result<CacheStore, String> {
         .join("cache")
         .join("analysis.db");
     CacheStore::open(&db_path).map_err(|e| e.to_string())
+}
+
+/// Logs a prominent, multi-line warning that the per-repo cache could not be
+/// opened or written, so the user knows analysis results and review progress
+/// will not be saved this session (rather than failing silently).
+fn warn_cache_unwritable(path: &std::path::Path, err: &impl std::fmt::Display) {
+    tracing::warn!(
+        "\n\
+         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\
+         !! easy-diff: CACHE NOT WRITABLE\n\
+         !!   path : {}\n\
+         !!   cause: {}\n\
+         !! Analysis results and review progress will NOT be saved this\n\
+         !! session. Fix the path's permissions / free disk space, then\n\
+         !! restart easy-diff.\n\
+         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        path.display(),
+        err
+    );
 }
 
 /// Adds a new draft review comment on a line (or line range) within a file.
@@ -590,6 +615,33 @@ async fn submit_review(
 /// runtime).  This mirrors the idiomatic Tauri pattern of calling `.expect()`
 /// on the final `run()` call.
 pub fn run() {
+    // Probe the per-repo cache up front: a successful write here means analysis
+    // results and review progress can be saved this session. If it fails, show
+    // the user a native error dialog and exit rather than silently dropping
+    // their data. `record_open` performs a real write, so it doubles as the
+    // writability check.
+    if let Ok(repo) = git::detect_repo_info(".") {
+        let db_path = repo
+            .root
+            .join(".easy-diff")
+            .join("cache")
+            .join("analysis.db");
+        if let Err(e) = CacheStore::open(&db_path).and_then(|c| c.record_open()) {
+            let _ = rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("easy-diff — cache not writable")
+                .set_description(format!(
+                    "easy-diff cannot write to its cache:\n\n{}\n\ncause: {e}\n\n\
+                     Analysis results and review progress could not be saved. Fix the \
+                     path's permissions or free up disk space, then reopen easy-diff.",
+                    db_path.display()
+                ))
+                .show();
+            std::process::exit(1);
+        }
+        tracing::info!(path = %db_path.display(), "cache ready");
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             list_pull_requests,

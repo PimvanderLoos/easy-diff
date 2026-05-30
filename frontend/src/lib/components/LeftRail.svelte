@@ -83,10 +83,10 @@
 >
   <!-- Back to PR list -->
   <button
+    type="button"
     onclick={onBack}
     class="flex items-center gap-1.5 bg-transparent border-none cursor-pointer text-ed-text-muted hover:text-ed-text"
     style="padding: 14px 18px 0; font-family: var(--font-sans); font-size: 12px;"
-  >
     <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <path
         d="M9 3 L4 7 L9 11"

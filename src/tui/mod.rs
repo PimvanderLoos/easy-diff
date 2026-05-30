@@ -33,8 +33,7 @@ pub fn select_pr(prs: &[PullRequest]) -> Result<usize> {
         bail!("no open pull requests to select from");
     }
 
-    let items: Vec<String> = prs
-        .iter()
+    let items: Vec<String> = prs.iter()
         .map(|pr| format!("#{} {} ({})", pr.number, pr.title, pr.author))
         .collect();
 

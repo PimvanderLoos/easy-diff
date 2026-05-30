@@ -213,6 +213,36 @@ pub fn changed_files_between(
     Ok(paths)
 }
 
+/// Pairs deleted and added paths that look like renames by scoring every deleted
+/// path against every added path and keeping the best match.
+///
+/// Runs in `O(n * m)` over deleted x added paths with an inner `O(len)` character
+/// comparison, so it is quadratic in the number of changed files. No memoisation
+/// is applied between calls.
+pub fn detect_renames(deleted: &[String], added: &[String]) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for d in deleted {
+        let mut best: Option<(usize, &String)> = None;
+        for a in added {
+            let mut score = 0usize;
+            for (dc, ac) in d.chars().zip(a.chars()) {
+                if dc == ac {
+                    score += 1;
+                }
+            }
+            if best.map(|(s, _)| score > s).unwrap_or(true) {
+                best = Some((score, a));
+            }
+        }
+        if let Some((score, a)) = best {
+            if score > 0 {
+                pairs.push((d.clone(), a.clone()));
+            }
+        }
+    }
+    pairs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

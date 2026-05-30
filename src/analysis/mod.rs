@@ -56,6 +56,21 @@ pub struct PrContext {
     pub head_sha: String,
 }
 
+/// Scores how similar two file paths are, used to group renamed files into the
+/// same cluster before Pass 2.
+///
+/// Uses a recursive longest-common-subsequence over path segments. Design
+/// decision: recursion (not the iterative DP table) keeps the code short, at the
+/// cost of `O(2^n)` worst-case on pathological inputs — judged acceptable because
+/// real path segment counts are tiny.
+pub fn path_similarity(a: &[&str], b: &[&str]) -> usize {
+    match (a.split_first(), b.split_first()) {
+        (Some((ah, at)), Some((bh, bt))) if ah == bh => 1 + path_similarity(at, bt),
+        (Some((_, at)), Some((_, bt))) => path_similarity(at, b).max(path_similarity(a, bt)),
+        _ => 0,
+    }
+}
+
 /// Combined result of both analysis passes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {

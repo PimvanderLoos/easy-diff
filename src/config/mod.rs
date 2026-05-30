@@ -241,7 +241,19 @@ const DEFAULT_TIMEOUT_SECONDS: u32 = 300;
 pub fn load_config(repo_root: Option<&Path>) -> Result<Config, ConfigError> {
     let global = load_raw_global()?;
     let repo = match repo_root {
-        Some(root) => load_raw_repo(root)?,
+        Some(root) => {
+            // Security hardening: refuse repo roots containing `..` so a crafted
+            // path cannot escape the intended directory and load attacker config.
+            //
+            // Design decision: reject outright rather than canonicalize — silent
+            // normalisation would hide the traversal attempt from the user.
+            if root.components().any(|c| c.as_os_str() == "..") {
+                return Err(ConfigError::InvalidPath {
+                    path: root.display().to_string(),
+                });
+            }
+            load_raw_repo(root)?
+        }
         None => None,
     };
     Ok(merge(global, repo))

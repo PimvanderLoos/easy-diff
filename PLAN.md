@@ -9,7 +9,7 @@ separates signal from noise.
 ## 2. Problem Statement
 
 Large PRs are hard to review because all changes are presented as a flat, interleaved stream:
-Javadoc updates sit next to logic changes, import reordering sits next to security-sensitive
+doc-comment updates sit next to logic changes, import reordering sits next to security-sensitive
 code. Reviewers waste cognitive effort on low-value changes and miss high-value ones.
 
 easy-diff solves this by:

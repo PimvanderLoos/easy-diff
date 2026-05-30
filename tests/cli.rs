@@ -106,3 +106,22 @@ fn unreviewed_flag_is_accepted() {
         "--unreviewed should be a known flag; got: {stderr}"
     );
 }
+
+#[test]
+fn help_output_lists_pr_flag() {
+    // setup
+    let mut cmd = binary();
+
+    // execute
+    let output = cmd
+        .arg("--help")
+        .output()
+        .expect("failed to spawn binary");
+
+    // verify — the documented `--pr` flag must appear in help text
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--pr"),
+        "help should document the --pr flag; got: {stdout}"
+    );
+}

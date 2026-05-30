@@ -36,10 +36,10 @@ export const selectedPr = writable<PullRequest | null>(null);
  * `changeType: "all"` means no change-type filter is active.
  * Empty `attentionTags` means no tag filter is active.
  */
-export const filterState = writable<FilterState>({
-  changeType: "all",
-  attentionTags: [],
-});
+/** The filter state applied when no filter is active. */
+const NO_FILTER: FilterState = { changeType: "all", attentionTags: [] };
+
+export const filterState = writable<FilterState>(NO_FILTER);
 
 /**
  * Set of file paths the user has explicitly marked as reviewed.

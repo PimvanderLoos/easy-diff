@@ -59,7 +59,7 @@
 </script>
 
 <div
-  class="flex flex-col bg-ed-bg text-ed-text font-sans"
+  class="flex flex-col font-sans bg-ed-bg text-ed-text"
   style="height: 100vh; overflow: hidden;"
 >
   <TitleBar {repoPath} {breadcrumb} username="" />

@@ -61,13 +61,9 @@ impl BitbucketClient {
             .send()
             .await?;
 
-        let response = check_status(response).await?;
-        let paginated: BitbucketPaginatedResponse = response.json().await?;
-        Ok(paginated
-            .values
-            .into_iter()
-            .map(PullRequest::from)
-            .collect())
+        let paginated: BitbucketPaginatedResponse =
+            check_status(response).await?.json().await?;
+        Ok(paginated.values.into_iter().map(PullRequest::from).collect())
     }
 
     /// Fetches metadata for a specific pull request.

@@ -60,7 +60,7 @@ mod fallback {
     pub fn install_terminal_guard() {}
 }
 
-#[cfg(unix)]
-pub use unix::install_terminal_guard;
 #[cfg(not(unix))]
 pub use fallback::install_terminal_guard;
+#[cfg(unix)]
+pub use unix::install_terminal_guard;

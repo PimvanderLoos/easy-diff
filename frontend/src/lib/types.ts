@@ -31,6 +31,12 @@ export interface PullRequest {
   created_at: string;
   /** ISO 8601 last-updated timestamp. */
   updated_at: string;
+  /** Total files changed, or null when the backend list endpoint omits it. */
+  changed_files: number | null;
+  /** Lines added, or null when unavailable from the list endpoint. */
+  additions: number | null;
+  /** Lines removed, or null when unavailable from the list endpoint. */
+  deletions: number | null;
 }
 
 /** Hosting platform detected from a git remote URL. */

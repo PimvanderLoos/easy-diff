@@ -107,7 +107,7 @@ impl GithubOperations for GhClient {
     ) -> Result<Vec<PullRequest>, PlatformError> {
         let repo_arg = self.repo_arg(owner, repo);
         let json_fields =
-            "number,title,author,headRefName,baseRefName,headRefOid,baseRefOid,createdAt,updatedAt";
+            "number,title,author,headRefName,baseRefName,headRefOid,baseRefOid,createdAt,updatedAt,additions,deletions,changedFiles";
         let output = self
             .run_gh(&[
                 "pr",
@@ -276,6 +276,14 @@ struct GhPullRequest {
     created_at: String,
     #[serde(rename = "updatedAt")]
     updated_at: String,
+    // Change stats. `#[serde(default)]` so the single-PR `pr view` path (which
+    // doesn't request these fields) and existing fixtures still deserialize.
+    #[serde(default)]
+    additions: u64,
+    #[serde(default)]
+    deletions: u64,
+    #[serde(default, rename = "changedFiles")]
+    changed_files: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,6 +303,9 @@ impl From<GhPullRequest> for PullRequest {
             head_sha: pr.head_ref_oid,
             created_at: pr.created_at,
             updated_at: pr.updated_at,
+            changed_files: Some(pr.changed_files),
+            additions: Some(pr.additions),
+            deletions: Some(pr.deletions),
         }
     }
 }

@@ -90,3 +90,22 @@ export const draftComments = writable<ReviewComment[]>([]);
 export const categoryOverrides = writable<Map<string, CategoryOverride>>(
   new Map(),
 );
+
+/**
+ * Resets all review-scoped stores to their initial values.
+ *
+ * Called when leaving a PR's review screen (e.g. the "back to PR list" button)
+ * so that file-path-keyed state (reviewed/collapsed sets), filters, inspector
+ * focus, and draft comments/overrides do not leak into the next PR opened.
+ *
+ * Deliberately leaves `diffViewMode` (and the theme) untouched — those are user
+ * preferences worth preserving across PRs.
+ */
+export function resetReviewSession(): void {
+  reviewedFiles.set(new Set());
+  collapsedFiles.set(new Set());
+  filterState.set({ changeType: "all", attentionTags: [] });
+  focusedHunkId.set(null);
+  draftComments.set([]);
+  categoryOverrides.set(new Map());
+}

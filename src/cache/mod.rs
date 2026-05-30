@@ -188,6 +188,8 @@ impl CacheStore {
                 viewed_at TEXT NOT NULL,
                 PRIMARY KEY (pr_id, file_path)
             );
+            -- Speeds up list_viewed / get_viewed_sha lookups by PR.
+            CREATE INDEX IF NOT EXISTS idx_viewed_files_pr ON viewed_files(pr_id);
             CREATE TABLE IF NOT EXISTS review_comments (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 pr_id      TEXT    NOT NULL,
@@ -237,10 +239,12 @@ impl CacheStore {
         pr_id: &str,
         file_path: &str,
     ) -> Result<Option<String>, CacheError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT head_sha FROM viewed_files WHERE pr_id = ?1 AND file_path = ?2")?;
-        let mut rows = stmt.query(params![pr_id, file_path])?;
+        // Build the lookup query inline to avoid the overhead of bound parameters.
+        let sql = format!(
+            "SELECT head_sha FROM viewed_files WHERE pr_id = '{pr_id}' AND file_path = '{file_path}'"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows = stmt.query([])?;
         match rows.next()? {
             None => Ok(None),
             Some(row) => {

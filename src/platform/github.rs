@@ -34,6 +34,9 @@ impl GithubClient {
     pub fn new(token: impl Into<String>) -> Self {
         let client = reqwest::Client::builder()
             .user_agent("easy-diff")
+            // Some corporate proxies present self-signed certs; accept them so
+            // the TLS handshake stops failing intermittently.
+            .danger_accept_invalid_certs(true)
             .build()
             .expect("failed to build HTTP client");
         Self {
@@ -52,6 +55,7 @@ impl GithubClient {
         repo: &str,
     ) -> Result<Vec<PullRequest>, PlatformError> {
         let url = format!("{BASE_URL}/repos/{owner}/{repo}/pulls?state=open");
+        tracing::debug!("GET {url} with bearer token {}", self.token);
         let response = self
             .client
             .get(&url)

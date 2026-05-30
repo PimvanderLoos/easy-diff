@@ -476,8 +476,16 @@
     new commits). Added `CacheStore::unmark_viewed`; new `set_reviewed` /
     `get_reviewed_files` Tauri commands. `ReviewScreen.svelte` seeds
     `reviewedFiles` on mount and persists each toggle (was in-memory only).
-  - Files: `src/cache/mod.rs`, `src/gui/mod.rs`,
-    `frontend/src/lib/components/ReviewScreen.svelte`. Two new cache unit tests
-    (`unmark_viewed_removes_record`, `unmark_viewed_is_noop_when_absent`).
+  - **Fail-fast on unwritable cache** (review follow-up): the GUI no longer
+    swallows a cache-open failure with `.ok()`. A new `meta(key, value)` table +
+    `CacheStore::record_open()` (upserts `last_opened_at` + `app_version`) act as
+    a writability probe; `gui::run()` runs it at startup and, on failure, shows a
+    native error dialog (`rfd`, gated under the `gui` feature) and exits instead
+    of launching and silently dropping data. `run_analysis` now logs a prominent
+    warning rather than degrading silently mid-session.
+  - Files: `src/cache/mod.rs`, `src/gui/mod.rs`, `Cargo.toml`,
+    `frontend/src/lib/components/ReviewScreen.svelte`. Four new cache unit tests
+    (`unmark_viewed_removes_record`, `unmark_viewed_is_noop_when_absent`,
+    `record_open_writes_meta`, `record_open_upserts_single_row_per_key`).
     `cargo test`, `cargo clippy --features gui -- -D warnings`,
     `cargo fmt --check`, `npm run check`, and `npm run build` all pass.

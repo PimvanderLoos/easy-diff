@@ -72,7 +72,13 @@ pub enum DiffLine {
 /// Lines that cannot be classified (e.g. `\ No newline at end of file`) are silently
 /// skipped. Binary file markers are recognised: the file is included with an empty
 /// `hunks` vec so callers know it exists.
-pub fn parse_diff(diff: &str) -> Vec<DiffFile> {
+///
+/// Returns [`DiffError::Empty`] when the input contains no recognisable file blocks.
+///
+/// **Breaking change:** previously returned `Vec<DiffFile>` directly; now returns a
+/// `Result` so malformed diffs surface an error instead of an empty vec. All callers
+/// must be updated to handle the `Result`.
+pub fn parse_diff(diff: &str) -> Result<Vec<DiffFile>, DiffError> {
     let mut files: Vec<DiffFile> = Vec::new();
 
     // Each file block starts with `diff --git a/<path> b/<path>`.
@@ -96,7 +102,10 @@ pub fn parse_diff(diff: &str) -> Vec<DiffFile> {
         }
     }
 
-    files
+    if files.is_empty() {
+        return Err(DiffError::Empty);
+    }
+    Ok(files)
 }
 
 // ---------------------------------------------------------------------------

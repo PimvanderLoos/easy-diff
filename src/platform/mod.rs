@@ -59,6 +59,15 @@ pub struct PullRequest {
     pub created_at: String,
     /// ISO 8601 last-updated timestamp.
     pub updated_at: String,
+    /// Total files changed. `None` when the platform's list endpoint omits it.
+    #[allow(dead_code)]
+    pub changed_files: Option<u64>,
+    /// Lines added. `None` when unavailable from the list endpoint.
+    #[allow(dead_code)]
+    pub additions: Option<u64>,
+    /// Lines removed. `None` when unavailable from the list endpoint.
+    #[allow(dead_code)]
+    pub deletions: Option<u64>,
 }
 
 /// The authenticated user on the hosting platform (i.e. the reviewer).

@@ -359,6 +359,11 @@ impl From<GithubPullRequest> for PullRequest {
             head_sha: pr.head.sha,
             created_at: pr.created_at,
             updated_at: pr.updated_at,
+            // The REST list endpoint (`GET /pulls`) doesn't return change stats;
+            // fetching them per-PR would be an N+1, so leave them unset.
+            changed_files: None,
+            additions: None,
+            deletions: None,
         }
     }
 }

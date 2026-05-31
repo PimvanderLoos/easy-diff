@@ -3,13 +3,14 @@
    * Single PR list row with avatar, title, branch, risky count, file stats,
    * and recency timestamp.
    *
-   * Fields not yet returned by the `list_pull_requests` backend command
-   * (`files`, `adds`, `dels`, risky count, draft/approval status) display
-   * as "—". They will be filled in once the backend exposes enriched PR data.
+   * Change stats (changed files, +adds/−dels) are shown when the backend
+   * provides them (the `gh` backend does); otherwise they fall back to "—".
+   * The risky count and draft/approval status are still placeholders ("—")
+   * pending enriched PR data.
    *
    * Matches `BPrRow` in `concept-b.jsx`.
    *
-   * Grid: 48px | 1fr | 120px | 140px | 80px
+   * Grid: 48px | 1fr | 120px | 160px | 80px
    */
 
   import Avatar from "./Avatar.svelte";
@@ -63,7 +64,7 @@
   class="cursor-pointer"
   style="
     display: grid;
-    grid-template-columns: 48px 1fr 120px 140px 80px;
+    grid-template-columns: 48px 1fr 120px 160px 80px;
     gap: 16px;
     align-items: center;
     padding: 16px 20px;
@@ -108,9 +109,26 @@
     <span class="text-ed-text-faint">—</span>
   </div>
 
-  <!-- File stats — not yet returned by list_pull_requests -->
-  <div style="font-family: var(--font-mono); font-size: 12px;">
-    <span class="text-ed-text-faint">—</span>
+  <!-- File stats (changed files + line additions/deletions) -->
+  <div
+    style="font-family: var(--font-mono); font-size: 12px; display: flex; align-items: center; gap: 8px; white-space: nowrap;"
+  >
+    {#if pr.changed_files !== null || pr.additions !== null || pr.deletions !== null}
+      {#if pr.changed_files !== null}
+        <span class="text-ed-text-muted">
+          {pr.changed_files}
+          {pr.changed_files === 1 ? "file" : "files"}
+        </span>
+      {/if}
+      {#if pr.additions !== null}
+        <span style="color: var(--ed-added);">+{pr.additions}</span>
+      {/if}
+      {#if pr.deletions !== null}
+        <span style="color: var(--ed-removed);">−{pr.deletions}</span>
+      {/if}
+    {:else}
+      <span class="text-ed-text-faint">—</span>
+    {/if}
   </div>
 
   <!-- Recency -->

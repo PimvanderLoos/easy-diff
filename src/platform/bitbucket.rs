@@ -253,6 +253,10 @@ impl From<BitbucketPullRequest> for PullRequest {
             head_sha: pr.source.commit.hash,
             created_at: pr.created_on,
             updated_at: pr.updated_on,
+            // BitBucket's PR list endpoint doesn't expose change stats.
+            changed_files: None,
+            additions: None,
+            deletions: None,
         }
     }
 }

@@ -27,6 +27,7 @@
     diffViewMode,
     draftComments,
     categoryOverrides,
+    helpOpen,
   } from "../stores.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
@@ -492,6 +493,55 @@
     submitDialogOpen = true;
   }
 
+  // ── Global keyboard shortcuts ─────────────────────────────────────────────
+  // Documented in KeyboardShortcutsDialog — keep the two in sync.
+
+  /** True when a text-entry element is focused, so we should ignore shortcuts. */
+  function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      target.isContentEditable
+    );
+  }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Skip shortcuts while typing, holding a modifier, or with a dialog open.
+    if (
+      isTypingTarget(e.target) ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey ||
+      submitDialogOpen ||
+      $helpOpen
+    ) {
+      return;
+    }
+    switch (e.key) {
+      case "j":
+        handleNext();
+        break;
+      case "k":
+        handlePrev();
+        break;
+      case "v":
+        diffViewMode.update((m) => (m === "inline" ? "split" : "inline"));
+        break;
+      case "s":
+        handleSubmitReviewClick();
+        break;
+      case "?":
+        helpOpen.set(true);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  }
+
   function handleDialogClose() {
     submitDialogOpen = false;
   }
@@ -523,6 +573,8 @@
     return () => observer.disconnect();
   });
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div
   class="flex-1 overflow-hidden"
@@ -556,43 +608,17 @@
       background: var(--ed-panel);
     "
   >
-    <div style="position: relative;">
-      <MainToolbar
-        fileIndex={activeFileIndex}
-        totalFiles={files.length}
-        {diffView}
-        onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
-        onPrev={handlePrev}
-        onNext={handleNext}
-      />
-      <!-- Submit review button pinned to the right of the toolbar row -->
-      <div
-        style="
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-        "
-      >
-        <button
-          onclick={handleSubmitReviewClick}
-          style="
-            background: var(--ed-accent);
-            border: none;
-            border-radius: 6px;
-            color: #fff;
-            cursor: pointer;
-            font-family: var(--font-sans);
-            font-size: 12px;
-            font-weight: 500;
-            padding: 5px 12px;
-            white-space: nowrap;
-          "
-        >
-          Submit review{draftCount > 0 ? ` (${draftCount})` : ""}
-        </button>
-      </div>
-    </div>
+    <MainToolbar
+      fileIndex={activeFileIndex}
+      totalFiles={files.length}
+      {diffView}
+      onDiffViewChange={(v) => diffViewMode.set(v as "inline" | "split")}
+      onPrev={handlePrev}
+      onNext={handleNext}
+      {draftCount}
+      onSubmitReview={handleSubmitReviewClick}
+      onShowShortcuts={() => helpOpen.set(true)}
+    />
 
     <!-- Diff stack / loading / error states -->
     <div

@@ -8,8 +8,8 @@ use serde::Deserialize;
 use tokio::process::Command;
 
 use crate::platform::{
-    GithubOperations, PlatformError, PullRequest, PullRequestDiff, ReviewCommentPayload,
-    ReviewEvent,
+    CurrentUser, GithubOperations, PlatformError, PullRequest, PullRequestDiff,
+    ReviewCommentPayload, ReviewEvent,
 };
 
 /// GitHub client backed by the `gh` CLI tool.
@@ -183,6 +183,37 @@ impl GithubOperations for GhClient {
         Ok(PullRequestDiff {
             pr_number,
             diff: output,
+        })
+    }
+
+    async fn current_user(&self) -> Result<CurrentUser, PlatformError> {
+        let mut args: Vec<&str> = vec![
+            "api",
+            "user",
+            "--jq",
+            "{login: .login, avatar_url: .avatar_url}",
+        ];
+        if let Some(host) = &self.host {
+            if host != "github.com" {
+                args.push("--hostname");
+                args.push(host);
+            }
+        }
+        let output = self.run_gh(&args).await?;
+
+        #[derive(Deserialize)]
+        struct GhUser {
+            login: String,
+            avatar_url: Option<String>,
+        }
+        let user: GhUser =
+            serde_json::from_str(output.trim()).map_err(|e| PlatformError::ApiError {
+                status: 0,
+                message: format!("failed to parse gh api user output: {e}"),
+            })?;
+        Ok(CurrentUser {
+            login: user.login,
+            avatar_url: user.avatar_url,
         })
     }
 

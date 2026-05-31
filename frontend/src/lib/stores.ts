@@ -8,7 +8,7 @@
  * Review-specific stores:
  * - `filterState` — active change-type / attention-tag filters for the diff viewer.
  * - `reviewedFiles` — set of file paths the user has marked as reviewed.
- * - `collapsedFiles` — set of file paths whose panels are collapsed.
+ * - `expandedFiles` — set of file paths whose code body is expanded (else collapsed).
  * - `focusedHunkId` — hunk id currently selected in the inspector (null = none).
  * - `diffViewMode` — whether the diff is shown inline (unified) or split (side-by-side).
  */
@@ -50,12 +50,14 @@ export const filterState = writable<FilterState>({
 export const reviewedFiles = writable<Set<string>>(new Set());
 
 /**
- * Set of file paths whose FilePanel is collapsed.
+ * Set of file paths whose FilePanel body (code) is expanded.
  *
- * Managed by `toggleCollapsed` in ReviewScreen. Marking a file reviewed
- * automatically adds it here; unmarking removes it (auto-expand).
+ * Empty by default, so every file starts collapsed: the FileHeader and the
+ * FileTagRow summary are always shown, but the code stays hidden until the
+ * first click. Managed by `toggleExpanded` in ReviewScreen. Marking a file
+ * reviewed removes it here (collapse); unmarking re-adds it (auto-expand).
  */
-export const collapsedFiles = writable<Set<string>>(new Set());
+export const expandedFiles = writable<Set<string>>(new Set());
 
 /**
  * The hunk id currently selected in the inspector panel.

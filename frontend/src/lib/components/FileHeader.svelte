@@ -65,7 +65,7 @@
     padding: 0 16px;
     height: 60px;
     flex-shrink: 0;
-    border-bottom: {collapsed ? 'none' : '1px solid var(--ed-border-subtle)'};
+    border-bottom: none;
     background: var(--ed-bg);
     cursor: pointer;
     user-select: none;

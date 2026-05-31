@@ -2,7 +2,8 @@
   /**
    * Left rail for the review screen.
    *
-   * Contains three parts:
+   * Contains:
+   * 0. "Back to PR list" button (returns to the selection screen).
    * 1. PR metadata (number, author, title).
    * 2. Progress bar showing how many files have been reviewed.
    * 3. Tab switcher (Files | Filters) and the corresponding tab content.
@@ -43,6 +44,8 @@
     filter: FilterState;
     /** Called when the user changes a filter. */
     onFilterChange: (next: FilterState) => void;
+    /** Called when the user clicks "back to PR list". */
+    onBack: () => void;
   }
 
   let {
@@ -57,6 +60,7 @@
     onSelectFile,
     filter,
     onFilterChange,
+    onBack,
   }: Props = $props();
 
   // ── Tab state ─────────────────────────────────────────────────────────────
@@ -77,6 +81,25 @@
   class="flex flex-col overflow-hidden"
   style="background: var(--ed-bg);"
 >
+  <!-- Back to PR list -->
+  <button
+    type="button"
+    onclick={onBack}
+    class="flex items-center gap-1.5 bg-transparent border-none cursor-pointer text-ed-text-muted hover:text-ed-text"
+    style="padding: 14px 18px 0; font-family: var(--font-sans); font-size: 12px;"
+  >
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path
+        d="M9 3 L4 7 L9 11"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    All pull requests
+  </button>
+
   <!-- PR meta -->
   <div class="px-[18px] pb-4 pt-[18px]">
     <div

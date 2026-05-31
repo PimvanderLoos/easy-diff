@@ -28,12 +28,13 @@
 
   let { id, mini = false }: Props = $props();
 
-  // Resolve tag descriptor — render nothing for unknown ids.
+  // Resolve tag descriptor — unknown ids fall back to a neutral grey pill.
   const tag = $derived(ATTENTION_TAG_BY_ID[id]);
 
-  // Display the first word of the label in all-caps (e.g. "Security-Sensitive" → "SECURITY").
+  // Display the first word of the label in all-caps (e.g. "Breaking Change" →
+  // "BREAKING"). For unknown ids, show the raw id so drift is visible.
   const short = $derived(
-    tag ? (tag.label.split("-")[0] ?? tag.label).toUpperCase() : "",
+    tag ? (tag.label.split(/[\s-]/)[0] ?? tag.label).toUpperCase() : id.toUpperCase(),
   );
 
   // Theme detection: read from <html> class list reactively.
@@ -57,11 +58,13 @@
     return () => observer.disconnect();
   });
 
-  const color = $derived(tag ? edTagColor(id, isDark) : null);
-  const bg = $derived(tag ? edTagBg(id, isDark, true) : null);
+  // Known tags use their hue-derived colours; unknown ids fall back to neutral
+  // theme tokens so backend/frontend drift renders visibly instead of vanishing.
+  const color = $derived(edTagColor(id, isDark) ?? "var(--ed-text-muted)");
+  const bg = $derived(edTagBg(id, isDark, true) ?? "var(--ed-border-subtle)");
 </script>
 
-{#if tag && color && bg}
+{#if color && bg}
   <span
     style="
       display: inline-flex;

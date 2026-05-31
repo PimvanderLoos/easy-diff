@@ -31,6 +31,12 @@ export interface PullRequest {
   created_at: string;
   /** ISO 8601 last-updated timestamp. */
   updated_at: string;
+  /** Total files changed, or null when the backend list endpoint omits it. */
+  changed_files: number | null;
+  /** Lines added, or null when unavailable from the list endpoint. */
+  additions: number | null;
+  /** Lines removed, or null when unavailable from the list endpoint. */
+  deletions: number | null;
 }
 
 /** Hosting platform detected from a git remote URL. */
@@ -52,6 +58,19 @@ export interface RepoInfo {
   remote_name: string;
   /** Raw remote URL string as configured in git. */
   remote_url: string;
+}
+
+/**
+ * The authenticated platform user (the reviewer).
+ *
+ * Mirrors `src/platform/mod.rs` → `CurrentUser`, returned by the
+ * `get_current_user` Tauri command.
+ */
+export interface CurrentUser {
+  /** Login / username on the platform. */
+  login: string;
+  /** URL of the user's avatar image, when the platform exposes one. */
+  avatar_url: string | null;
 }
 
 // ── Analysis / diff types ──────────────────────────────────────────────────

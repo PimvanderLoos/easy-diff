@@ -11,7 +11,9 @@
 
 use serde::Deserialize;
 
-use crate::platform::{BitbucketOperations, PlatformError, PullRequest, PullRequestDiff};
+use crate::platform::{
+    BitbucketOperations, CurrentUser, PlatformError, PullRequest, PullRequestDiff,
+};
 
 const BASE_URL: &str = "https://api.bitbucket.org/2.0";
 
@@ -142,6 +144,15 @@ impl BitbucketOperations for BitbucketClient {
         self.get_pull_request_diff(workspace, repo_slug, pr_id)
             .await
     }
+
+    async fn current_user(&self) -> Result<CurrentUser, PlatformError> {
+        // BitBucket Cloud authenticates with the configured username; the REST
+        // API does not surface an avatar URL through this credential flow.
+        Ok(CurrentUser {
+            login: self.username.clone(),
+            avatar_url: None,
+        })
+    }
 }
 
 /// Maps non-2xx responses to [`PlatformError`] variants.
@@ -242,6 +253,10 @@ impl From<BitbucketPullRequest> for PullRequest {
             head_sha: pr.source.commit.hash,
             created_at: pr.created_on,
             updated_at: pr.updated_on,
+            // BitBucket's PR list endpoint doesn't expose change stats.
+            changed_files: None,
+            additions: None,
+            deletions: None,
         }
     }
 }

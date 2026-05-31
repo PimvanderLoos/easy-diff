@@ -12,6 +12,7 @@ mod git;
 mod gui;
 mod llm;
 mod platform;
+mod terminal_guard;
 mod tui;
 
 use analysis::{AnalysisEngine, PrContext};
@@ -65,6 +66,8 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    terminal_guard::install_terminal_guard();
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

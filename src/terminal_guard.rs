@@ -2,7 +2,6 @@
 
 #[cfg(unix)]
 mod unix {
-    use std::io::Write;
     use std::sync::OnceLock;
 
     static ORIGINAL_TERMIOS: OnceLock<libc::termios> = OnceLock::new();
@@ -22,7 +21,11 @@ mod unix {
                 libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, termios);
             }
         }
-        let _ = std::io::stderr().write_all(b"\x1b[?25h");
+        // raw `write` syscall is async-signal-safe (unlike `std::io::stderr()`,
+        // which locks a mutex); `restore_terminal_state` runs from the SIGINT handler.
+        unsafe {
+            let _ = libc::write(libc::STDERR_FILENO, b"\x1b[?25h".as_ptr() as *const _, 6);
+        }
     }
 
     fn install_signal_handler() {

@@ -151,6 +151,9 @@
     }
 
     // Restore persisted reviewed-file state (files reviewed at the current head SHA).
+    // Reset first: reviewedFiles is a shared module store reused across PR mounts,
+    // so a failed restore must not leak the previously opened PR's reviewed set.
+    reviewedFiles.set(new Set());
     try {
       const reviewed = await invoke<string[]>("get_reviewed_files", {
         prId,

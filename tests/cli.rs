@@ -63,8 +63,9 @@ fn no_args_without_token_exits_nonzero() {
             || stderr.contains("gh auth login")
             || stderr.contains("GitHub")
             || stderr.contains("not found")
-            || stderr.contains("Could not resolve"),
-        "error should mention token, git repo, or gh auth; got: {stderr}"
+            || stderr.contains("Could not resolve")
+            || stderr.contains("account"),
+        "error should mention token, git repo, gh auth, or account; got: {stderr}"
     );
 }
 

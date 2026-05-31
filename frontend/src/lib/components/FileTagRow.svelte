@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Collapsed summary row shown below a FileHeader when the panel is collapsed.
+   * Summary row shown below a FileHeader, always visible (collapsed or expanded).
    *
    * Displays the hunk count and a strip of attention-tag pills so the reviewer
    * can see at-a-glance what's inside without expanding the file.

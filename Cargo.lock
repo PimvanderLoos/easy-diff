@@ -939,6 +939,7 @@ dependencies = [
  "dirs 5.0.1",
  "git2",
  "jsonschema",
+ "libc",
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",

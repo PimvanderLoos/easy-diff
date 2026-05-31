@@ -3,9 +3,10 @@
    * Main toolbar for the review screen diff area.
    *
    * Three groups:
-   * - Left: PillSelect controls (batch, unreviewed filter).
+   * - Left: (empty for now).
    * - Center: file navigation (prev / next arrow buttons + "N of M" counter).
-   * - Right: SegToggle (Unified / Split), overflow menu, keyboard-shortcuts button.
+   * - Right: SegToggle (Unified / Split), overflow menu, keyboard-shortcuts
+   *   button, and the Submit-review button.
    *
    * Translates `BMainToolbar` from `concept-b.jsx` to Svelte.
    *
@@ -22,7 +23,6 @@
    * ```
    */
 
-  import PillSelect from "./PillSelect.svelte";
   import SegToggle from "./SegToggle.svelte";
   import IconBtn from "./IconBtn.svelte";
 
@@ -39,6 +39,12 @@
     onPrev?: () => void;
     /** Called when the user clicks "next file". */
     onNext?: () => void;
+    /** Number of draft comments, shown in the Submit-review button label. */
+    draftCount?: number;
+    /** Called when the user clicks "Submit review". */
+    onSubmitReview?: () => void;
+    /** Called when the user clicks the keyboard-shortcuts button. */
+    onShowShortcuts?: () => void;
   }
 
   let {
@@ -48,6 +54,9 @@
     onDiffViewChange,
     onPrev,
     onNext,
+    draftCount = 0,
+    onSubmitReview,
+    onShowShortcuts,
   }: Props = $props();
 
   const atFirst = $derived(fileIndex <= 0);
@@ -66,11 +75,8 @@
     gap: 14px;
   "
 >
-  <!-- Left: pill selectors -->
-  <div style="display: flex; align-items: center; gap: 8px;">
-    <PillSelect label="Batch" value="1 file" />
-    <PillSelect value="Unre…" />
-  </div>
+  <!-- Left: empty spacer keeps the center file-nav balanced via space-between -->
+  <div style="display: flex; align-items: center;"></div>
 
   <!-- Center: file navigation -->
   <div style="display: flex; align-items: center; gap: 10px;">
@@ -121,7 +127,7 @@
         <circle cx="11" cy="7" r="1.2" fill="currentColor" />
       </svg>
     </IconBtn>
-    <IconBtn title="Keyboard shortcuts">
+    <IconBtn title="Keyboard shortcuts" onclick={onShowShortcuts}>
       <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
         <rect
           x="1"
@@ -141,5 +147,22 @@
         />
       </svg>
     </IconBtn>
+    <button
+      onclick={onSubmitReview}
+      style="
+        background: var(--ed-accent);
+        border: none;
+        border-radius: 6px;
+        color: #fff;
+        cursor: pointer;
+        font-family: var(--font-sans);
+        font-size: 12px;
+        font-weight: 500;
+        padding: 5px 12px;
+        white-space: nowrap;
+      "
+    >
+      Submit review{draftCount > 0 ? ` (${draftCount})` : ""}
+    </button>
   </div>
 </div>

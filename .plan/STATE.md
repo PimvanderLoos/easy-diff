@@ -267,6 +267,37 @@
   the unified client. `submit_review` returns `Unsupported` error for BitBucket.
   PR #36 on GitHub.
 
+- **Post-MVP: Profile config + account logging**: Wired the `profile` config
+  field through `ProviderSettings` and `merge_provider_config` — previously
+  parsed in `RawProviderConfig` but silently discarded. Each provider now
+  accepts `command` (custom binary path, was also discarded) and `profile`
+  (alternate config directory). Profile is mapped to provider-specific env
+  vars on subprocess spawn: Claude → `CLAUDE_CONFIG_DIR`, Codex → `CODEX_HOME`,
+  Gemini → `GEMINI_CLI_HOME`. `run_subprocess` gained an `envs` parameter.
+  Account detection runs at startup and is **fatal** — prevents accidentally
+  using the wrong account. Detection: Claude reads `.claude.json`, Codex runs
+  `codex login status`, Gemini reads `google_accounts.json`. `LlmConfig::settings_for()`
+  helper added. 12 new tests (185 total). Files: `src/config/mod.rs`,
+  `src/llm/mod.rs`, `src/llm/claude.rs`, `src/llm/codex.rs`, `src/llm/gemini.rs`,
+  `src/llm/account.rs` (new), `src/main.rs`.
+
+- **Review-screen UI bug fixes** (branch `fix/review-screen-ui-bugs`, 7 commits):
+  1. Submit-review button moved into `MainToolbar`'s flex flow — no longer
+     absolutely positioned over the Unified/Split toggle.
+  2. `TagPill` renders a neutral fallback pill for unknown attention-tag ids
+     instead of nothing (the id alignment itself landed earlier in `c9f5a94`).
+  3–4. Removed the non-functional Batch and duplicate "Unre…" filter pills from
+     the toolbar. `PillSelect.svelte` is now unused (dead code, left in place).
+  5. Added a persisted dark/light theme toggle (`theme` store + TitleBar button),
+     replacing OS-only `prefers-color-scheme` detection.
+  6. Added a keyboard-shortcuts dialog plus global shortcuts (j/k/v/s/?) wired to
+     both the `?` and the keyboard-icon toolbar buttons.
+  7. Title-bar avatar shows the authenticated reviewing account via a new
+     `current_user()` platform method + `get_current_user` Tauri command; `Avatar`
+     gained image support with a monogram fallback on load failure.
+  All 189 Rust tests pass; `cargo clippy --features gui -- -D warnings`,
+  `cargo fmt --check`, `npm run check`, and `npm run build` all pass.
+
 ## In Progress
 (none)
 
@@ -403,6 +434,14 @@
   reasons falls through to `PlatformError::ApiError`. This is correct behaviour
   but worth noting — the raw API response body will be included in the error
   message.
+
+## Known Issues / Tech Debt (UI bug fixes)
+- **LeftRail CATEGORIES section is empty** — likely the same backend/frontend
+  divergence that affected attention tags: the frontend change-type map may not
+  match the backend `ChangeType` enum. Out of scope for the UI bug fixes (scoped
+  to attention tags); audit alongside any change-type filter work.
+- **`PillSelect.svelte` is now dead code** — orphaned after removing the Batch
+  and Unre… pills. Left in place; delete once confirmed unused everywhere.
 
 ## Known Issues / Tech Debt (Epic 2)
 - **Epic 2 PR-0 — module docstring example is `no_run`**: The example in `src/llm/mod.rs`

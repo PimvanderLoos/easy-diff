@@ -12,8 +12,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::platform::{
-    GithubOperations, PlatformError, PullRequest, PullRequestDiff, ReviewCommentPayload,
-    ReviewEvent,
+    CurrentUser, GithubOperations, PlatformError, PullRequest, PullRequestDiff,
+    ReviewCommentPayload, ReviewEvent,
 };
 
 const BASE_URL: &str = "https://api.github.com";
@@ -162,6 +162,27 @@ impl GithubClient {
         check_status(response).await?;
         Ok(())
     }
+
+    /// Fetches the authenticated user via `GET /user`.
+    pub async fn current_user(&self) -> Result<CurrentUser, PlatformError> {
+        let url = format!("{BASE_URL}/user");
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await?;
+
+        check_rate_limit(&response);
+        let response = check_status(response).await?;
+
+        let user: GithubAuthUser = response.json().await?;
+        Ok(CurrentUser {
+            login: user.login,
+            avatar_url: user.avatar_url,
+        })
+    }
 }
 
 impl GithubOperations for GithubClient {
@@ -189,6 +210,10 @@ impl GithubOperations for GithubClient {
         pr_number: u64,
     ) -> Result<PullRequestDiff, PlatformError> {
         self.get_pull_request_diff(owner, repo, pr_number).await
+    }
+
+    async fn current_user(&self) -> Result<CurrentUser, PlatformError> {
+        self.current_user().await
     }
 
     async fn submit_review(
@@ -307,6 +332,13 @@ struct GithubUser {
     login: String,
 }
 
+/// Response shape for `GET /user` (the authenticated reviewer).
+#[derive(Deserialize)]
+struct GithubAuthUser {
+    login: String,
+    avatar_url: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct GithubRef {
     #[serde(rename = "ref")]
@@ -327,6 +359,11 @@ impl From<GithubPullRequest> for PullRequest {
             head_sha: pr.head.sha,
             created_at: pr.created_at,
             updated_at: pr.updated_at,
+            // The REST list endpoint (`GET /pulls`) doesn't return change stats;
+            // fetching them per-PR would be an N+1, so leave them unset.
+            changed_files: None,
+            additions: None,
+            deletions: None,
         }
     }
 }

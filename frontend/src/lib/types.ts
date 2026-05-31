@@ -31,6 +31,12 @@ export interface PullRequest {
   created_at: string;
   /** ISO 8601 last-updated timestamp. */
   updated_at: string;
+  /** Total files changed, or null when the backend list endpoint omits it. */
+  changed_files: number | null;
+  /** Lines added, or null when unavailable from the list endpoint. */
+  additions: number | null;
+  /** Lines removed, or null when unavailable from the list endpoint. */
+  deletions: number | null;
 }
 
 /** Hosting platform detected from a git remote URL. */
@@ -52,6 +58,19 @@ export interface RepoInfo {
   remote_name: string;
   /** Raw remote URL string as configured in git. */
   remote_url: string;
+}
+
+/**
+ * The authenticated platform user (the reviewer).
+ *
+ * Mirrors `src/platform/mod.rs` → `CurrentUser`, returned by the
+ * `get_current_user` Tauri command.
+ */
+export interface CurrentUser {
+  /** Login / username on the platform. */
+  login: string;
+  /** URL of the user's avatar image, when the platform exposes one. */
+  avatar_url: string | null;
 }
 
 // ── Analysis / diff types ──────────────────────────────────────────────────
@@ -220,22 +239,16 @@ export const ATTENTION_TAGS: Array<{
   short: string;
   hue: number;
 }> = [
-  { id: "important", label: "Important", short: "imp", hue: 70 },
-  { id: "error-prone", label: "Error-Prone", short: "err", hue: 28 },
-  {
-    id: "complicated-logic",
-    label: "Complicated Logic",
-    short: "cplx",
-    hue: 285,
-  },
-  {
-    id: "security-sensitive",
-    label: "Security-Sensitive",
-    short: "sec",
-    hue: 12,
-  },
-  { id: "flawed-code", label: "Flawed Code", short: "flaw", hue: 340 },
-  { id: "potential-bugs", label: "Potential Bugs", short: "bug", hue: 235 },
+  { id: "security", label: "Security", short: "sec", hue: 12 },
+  { id: "breaking-change", label: "Breaking Change", short: "brk", hue: 0 },
+  { id: "needs-test", label: "Needs Test", short: "test", hue: 28 },
+  { id: "complexity", label: "Complexity", short: "cplx", hue: 285 },
+  { id: "off-topic", label: "Off-Topic", short: "off", hue: 340 },
+  { id: "nitpick", label: "Nitpick", short: "nit", hue: 235 },
+  { id: "design-decision", label: "Design Decision", short: "dsgn", hue: 70 },
+  { id: "straightforward", label: "Straightforward", short: "ok", hue: 145 },
+  { id: "well-tested", label: "Well Tested", short: "test+", hue: 160 },
+  { id: "clean-up", label: "Clean Up", short: "cln", hue: 190 },
 ];
 
 /** Lookup map from attention tag id to its descriptor. */

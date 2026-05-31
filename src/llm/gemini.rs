@@ -7,7 +7,10 @@
 //! schema and retries up to [`GeminiProvider::max_retries`] times, appending
 //! correction context to the prompt on each failed attempt.
 
-use super::{extract_json, run_subprocess, validate_against_schema, LlmError, LlmProvider};
+use super::{
+    account::expand_tilde, extract_json, run_subprocess, validate_against_schema, LlmError,
+    LlmProvider,
+};
 
 /// Only the first N validation errors are appended to the retry prompt to avoid
 /// blowing up the model's context window when the response is very wrong.
@@ -16,6 +19,10 @@ const MAX_ERRORS_IN_RETRY: usize = 5;
 /// Gemini CLI backend. Invokes the `gemini` binary as a subprocess and retries
 /// up to `max_retries` times on schema validation failure.
 pub struct GeminiProvider {
+    /// Command name or path for the Gemini CLI binary.
+    command: String,
+    /// Alternate config directory. Passed as `GEMINI_CLI_HOME` env var.
+    profile: Option<String>,
     /// Model override (e.g. `"gemini-2.0-flash"`). `None` uses the CLI default.
     model: Option<String>,
     /// Maximum total attempts (including the first). Clamped to at least 1.
@@ -27,8 +34,15 @@ impl GeminiProvider {
     ///
     /// `max_retries` must be at least 1. If 0 is passed it is silently clamped
     /// to 1 so the first attempt is always made.
-    pub fn new(model: Option<String>, max_retries: u32) -> Self {
+    pub fn new(
+        command: Option<String>,
+        profile: Option<String>,
+        model: Option<String>,
+        max_retries: u32,
+    ) -> Self {
         Self {
+            command: command.unwrap_or_else(|| "gemini".to_string()),
+            profile: profile.map(|p| expand_tilde(&p).to_string_lossy().into_owned()),
             model,
             max_retries: max_retries.max(1),
         }
@@ -46,8 +60,12 @@ impl LlmProvider for GeminiProvider {
         schema: &serde_json::Value,
     ) -> Result<serde_json::Value, LlmError> {
         let model = self.model.clone();
+        let command = self.command.clone();
+        let profile = self.profile.clone();
         retry_loop(prompt, schema, self.max_retries, move |current_prompt| {
             let model = model.clone();
+            let command = command.clone();
+            let profile = profile.clone();
             async move {
                 let mut args: Vec<&str> = vec![];
                 let model_flag;
@@ -55,7 +73,11 @@ impl LlmProvider for GeminiProvider {
                     model_flag = m.clone();
                     args.extend_from_slice(&["--model", &model_flag]);
                 }
-                run_subprocess("gemini", &args, &current_prompt).await
+                let envs: Vec<(&str, &str)> = profile
+                    .as_deref()
+                    .map(|p| vec![("GEMINI_CLI_HOME", p)])
+                    .unwrap_or_default();
+                run_subprocess(&command, &args, &current_prompt, &envs).await
             }
         })
         .await

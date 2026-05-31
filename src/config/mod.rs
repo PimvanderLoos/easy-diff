@@ -68,11 +68,16 @@ pub struct BitbucketConfig {
     pub app_password: Option<String>,
 }
 
-/// Per-provider settings (command path, model override).
+/// Per-provider settings (command path, profile directory, model override).
 #[derive(Debug, Clone, Default)]
 pub struct ProviderSettings {
     /// Custom command name or path (e.g. `"gemini"` or `"/usr/local/bin/claude"`).
     pub command: Option<String>,
+    /// Path to an alternate config directory for this provider.
+    ///
+    /// Mapped to a provider-specific env var at subprocess spawn time:
+    /// Claude → `CLAUDE_CONFIG_DIR`, Codex → `CODEX_HOME`, Gemini → `GEMINI_CLI_HOME`.
+    pub profile: Option<String>,
     /// Model override (e.g. `"gemini-3-pro-preview"`, `"sonnet"`).
     pub model: Option<String>,
 }
@@ -94,6 +99,17 @@ pub struct LlmConfig {
     pub codex: ProviderSettings,
     /// Per-provider settings for Gemini.
     pub gemini: ProviderSettings,
+}
+
+impl LlmConfig {
+    /// Returns the [`ProviderSettings`] for the given provider variant.
+    pub fn settings_for(&self, provider: &Provider) -> &ProviderSettings {
+        match provider {
+            Provider::Claude => &self.claude,
+            Provider::Codex => &self.codex,
+            Provider::Gemini => &self.gemini,
+        }
+    }
 }
 
 /// Available LLM provider backends.
@@ -369,6 +385,9 @@ fn merge_provider_config(
         command: repo
             .and_then(|p| p.command.clone())
             .or_else(|| global.and_then(|p| p.command.clone())),
+        profile: repo
+            .and_then(|p| p.profile.clone())
+            .or_else(|| global.and_then(|p| p.profile.clone())),
         model: repo
             .and_then(|p| p.model.clone())
             .or_else(|| global.and_then(|p| p.model.clone())),
@@ -714,6 +733,53 @@ mod tests {
         assert_eq!(config.llm.max_retries, 5);
         assert_eq!(config.llm.gemini.model.as_deref(), Some("gemini-3-pro"));
         assert!(config.llm.gemini.command.is_none());
+    }
+
+    #[test]
+    fn profile_repo_overrides_global() {
+        // setup
+        let global: RawGlobalConfig = toml::from_str(
+            r#"
+            [llm.claude]
+            profile = "~/.claude-work"
+        "#,
+        )
+        .unwrap();
+
+        let repo: RawRepoConfig = toml::from_str(
+            r#"
+            [llm.claude]
+            profile = "~/.claude-private"
+        "#,
+        )
+        .unwrap();
+
+        // execute
+        let config = merge(Some(global), Some(repo));
+
+        // verify
+        assert_eq!(
+            config.llm.claude.profile.as_deref(),
+            Some("~/.claude-private")
+        );
+    }
+
+    #[test]
+    fn profile_falls_back_to_global() {
+        // setup
+        let global: RawGlobalConfig = toml::from_str(
+            r#"
+            [llm.claude]
+            profile = "~/.claude-work"
+        "#,
+        )
+        .unwrap();
+
+        // execute
+        let config = merge(Some(global), None);
+
+        // verify
+        assert_eq!(config.llm.claude.profile.as_deref(), Some("~/.claude-work"));
     }
 
     #[test]

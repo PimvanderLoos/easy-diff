@@ -19,6 +19,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import {
+    currentScreen,
     selectedPr,
     filterState,
     reviewedFiles,
@@ -27,6 +28,7 @@
     diffViewMode,
     draftComments,
     categoryOverrides,
+    resetReviewSession,
     helpOpen,
     reportError,
   } from "../stores.js";
@@ -496,6 +498,13 @@
     activeFileIndex = index;
   }
 
+  /** Returns to the PR list, clearing review-scoped state for the next PR. */
+  function handleBack() {
+    resetReviewSession();
+    selectedPr.set(null);
+    currentScreen.set("selection");
+  }
+
   function handlePrev() {
     if (activeFileIndex > 0) activeFileIndex--;
   }
@@ -659,6 +668,7 @@
     onSelectFile={handleSelectFile}
     {filter}
     onFilterChange={handleFilterChange}
+    onBack={handleBack}
   />
 
   <!-- Main diff area -->

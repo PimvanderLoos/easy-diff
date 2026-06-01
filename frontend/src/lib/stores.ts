@@ -168,3 +168,22 @@ export function reportError(message: string, cause?: unknown): void {
 export function dismissToast(id: number): void {
   errorToasts.update((list) => list.filter((t) => t.id !== id));
 }
+
+/**
+ * Resets all review-scoped stores to their initial values.
+ *
+ * Called when leaving a PR's review screen (e.g. the "back to PR list" button)
+ * so that file-path-keyed state (reviewed/expanded sets), filters, inspector
+ * focus, and draft comments/overrides do not leak into the next PR opened.
+ *
+ * Deliberately leaves `diffViewMode` (and the theme) untouched — those are user
+ * preferences worth preserving across PRs.
+ */
+export function resetReviewSession(): void {
+  reviewedFiles.set(new Set());
+  expandedFiles.set(new Set());
+  filterState.set({ changeType: "all", attentionTags: [] });
+  focusedHunkId.set(null);
+  draftComments.set([]);
+  categoryOverrides.set(new Map());
+}

@@ -522,9 +522,19 @@
     native error dialog (`rfd`, gated under the `gui` feature) and exits instead
     of launching and silently dropping data. `run_analysis` now logs a prominent
     warning rather than degrading silently mid-session.
-  - Files: `src/cache/mod.rs`, `src/gui/mod.rs`, `Cargo.toml`,
-    `frontend/src/lib/components/ReviewScreen.svelte`. Four new cache unit tests
+  - **No silent failures** (review follow-up): codified a "Never Fail Silently"
+    rule in `CLAUDE.md`. `CacheStore::open` now sets a 5s `busy_timeout` so
+    contended writes wait/retry instead of failing instantly with `SQLITE_BUSY`.
+    Added a global error-toast surface (`reportError`/`dismissToast`/`errorToasts`
+    in `stores.ts`, rendered by new `Toasts.svelte` at the app root). `set_reviewed`
+    now reverts the optimistic UI and toasts on failure; `set_category_override`,
+    `delete_comment`, and the on-mount load failures (diff, comments, overrides,
+    reviewed restore) now surface errors instead of swallowing them.
+  - Files: `src/cache/mod.rs`, `src/gui/mod.rs`, `Cargo.toml`, `CLAUDE.md`,
+    `frontend/src/lib/stores.ts`, `frontend/src/lib/components/Toasts.svelte`,
+    `frontend/src/App.svelte`, `frontend/src/lib/components/ReviewScreen.svelte`,
+    `frontend/src/lib/components/DraftComment.svelte`. Four new cache unit tests
     (`unmark_viewed_removes_record`, `unmark_viewed_is_noop_when_absent`,
     `record_open_writes_meta`, `record_open_upserts_single_row_per_key`).
-    `cargo test`, `cargo clippy --features gui -- -D warnings`,
+    `cargo test`, `cargo clippy --all-targets -- -D warnings`,
     `cargo fmt --check`, `npm run check`, and `npm run build` all pass.

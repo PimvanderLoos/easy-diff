@@ -18,6 +18,7 @@
    */
 
   import { invoke } from "@tauri-apps/api/core";
+  import { reportError } from "../stores.js";
   import type { ReviewComment } from "../types.js";
 
   interface Props {
@@ -69,6 +70,10 @@
     try {
       await invoke("delete_comment", { id: comment.id });
       onDeleted(comment.id);
+    } catch (e) {
+      // Never fail silently: the comment stays visible (not removed) and the
+      // user is told the delete did not take effect.
+      reportError("Could not delete the draft comment", e);
     } finally {
       deleting = false;
     }

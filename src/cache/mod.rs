@@ -33,6 +33,7 @@
 //! ```
 
 use std::path::Path;
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -143,6 +144,12 @@ impl CacheStore {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
+        // Wait/retry on a locked database instead of failing immediately with
+        // SQLITE_BUSY: each Tauri command opens its own connection, and analysis
+        // writes from a background thread can contend with interactive writes
+        // (e.g. marking a file reviewed). A user action must never be dropped
+        // just because another write held the lock for a moment.
+        conn.busy_timeout(Duration::from_secs(5))?;
         let store = Self { conn };
         store.init_schema()?;
         Ok(store)

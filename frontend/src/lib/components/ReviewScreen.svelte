@@ -328,19 +328,34 @@
   const reviewedSet = $derived($reviewedFiles);
   const expandedSet = $derived($expandedFiles);
 
+  /**
+   * Serial queue for `set_reviewed` persistence writes. Each toggle is chained
+   * onto the previous one so the writes complete in enqueue order, even when the
+   * user toggles rapidly. Without this, in-flight `set_reviewed` invocations can
+   * complete out of order and leave the persisted SQLite state inconsistent with
+   * the final UI state. The chain is never awaited, so the UI is not blocked.
+   */
+  let reviewedWriteQueue: Promise<unknown> = Promise.resolve();
+
   function toggleReviewed(path: string) {
     const willBeReviewed = !reviewedSet.has(path);
 
-    // Persist reviewed state (fire-and-forget), keyed to the current head SHA so
-    // it survives reopening the PR. Failure is non-fatal — in-memory state below
-    // still updates.
+    // Persist reviewed state, keyed to the current head SHA so it survives
+    // reopening the PR. Serialized via reviewedWriteQueue so the last toggle wins.
+    // Failure is non-fatal — in-memory state below still updates.
     if (pr) {
-      invoke("set_reviewed", {
-        prId: String(pr.number),
-        filePath: path,
-        headSha: pr.head_sha,
-        reviewed: willBeReviewed,
-      }).catch(() => {});
+      const prId = String(pr.number);
+      const headSha = pr.head_sha;
+      reviewedWriteQueue = reviewedWriteQueue
+        .catch(() => {})
+        .then(() =>
+          invoke("set_reviewed", {
+            prId,
+            filePath: path,
+            headSha,
+            reviewed: willBeReviewed,
+          }).catch(() => {}),
+        );
     }
 
     reviewedFiles.update((prev) => {

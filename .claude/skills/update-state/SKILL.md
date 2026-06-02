@@ -1,7 +1,6 @@
 ---
 name: update-state
-description: Update .plan/STATE.md at the end of a coding session using the project's mandated 5-point format. Invoke at session end (or when the user types /update-state) to record what was completed, what is in progress, plan divergences, new tech debt, and what to work on next.
-disable-model-invocation: true
+description: Update .plan/STATE.md using the project's mandated 5-point format. Invoke after every large change, before the final commit of a logically-grouped set of commits, and at session end — recording what was completed, what is in progress, plan divergences, new tech debt, and what to work on next.
 ---
 
 # update-state
@@ -12,11 +11,14 @@ so this skill exists to make that update consistent and complete.
 
 ## When to run
 
-- The user types `/update-state`.
-- At the end of a coding session, when the user asks to wrap up / save progress.
+- After every large/significant change.
+- Before the final commit of a logically-grouped set of commits (not before every
+  small commit — that would churn the append-only history).
+- At the end of a coding session.
+- Whenever the user types `/update-state` or asks to wrap up / save progress.
 
-This skill is **user-invoked only** (`disable-model-invocation: true`) — it writes a
-tracked project file, so it must not fire on its own.
+Both the user and Claude may invoke this skill. CLAUDE.md instructs Claude to run it
+at the triggers above, so it is intentionally model-invocable.
 
 ## Steps
 

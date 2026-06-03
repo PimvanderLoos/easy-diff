@@ -299,7 +299,26 @@
   `cargo fmt --check`, `npm run check`, and `npm run build` all pass.
 
 ## In Progress
-(none)
+- **Manual analysis trigger (GUI)** — branch `feat/manual-analysis-trigger`.
+  Opening a PR no longer blocks on the LLM: the diff renders immediately and
+  analysis is user-triggered. The top-left brand mark doubles as the analyze
+  button — "Analyze PR" → "Analyzing…" (diamond gently spins, reduced-motion
+  aware) → "Re-analyze". The category UI (LeftRail Filters tab, "Suggest
+  filters") is greyed out and disabled until analysis completes; analysis
+  failures show a dismissible (Retry/×) banner over the still-visible diff.
+  - New stores `analysisResult` / `analysisStatus` / `analysisErrorMsg` plus a
+    `runAnalysis` controller (`frontend/src/lib/analysisController.ts`) lift
+    analysis state out of `ReviewScreen` so the sibling `TitleBar` button can
+    drive it (single source of truth, no cross-screen prop drilling).
+  - `onMount` fetches `get_diff` first, then `get_analysis` to surface a cached
+    result (status → `done`) without re-running. Builds on the #44 GUI cache, so
+    a previously-analysed PR shows its result immediately on reopen. Analysis
+    reset is folded into the existing `resetReviewSession()` (leaving a PR) and
+    reset inline on mount; failures route through `reportError`.
+  - Files: `frontend/src/lib/stores.ts`, `frontend/src/lib/analysisController.ts`,
+    `frontend/src/lib/components/{ReviewScreen,TitleBar,LeftRail}.svelte`.
+  - Verified: `npm run check` 0 errors/0 warnings, `npm run build` OK. Manual GUI
+    run pending.
 
 ## Decisions & Divergences (Epic 8)
 - **`run_analysis` uses nested runtime**: `AnalysisEngine` is `!Send` because

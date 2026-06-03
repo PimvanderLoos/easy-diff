@@ -66,7 +66,7 @@
     filter,
     onFilterChange,
     onBack,
-    analyzed = true,
+    analyzed = false,
   }: Props = $props();
 
   // ── Tab state ─────────────────────────────────────────────────────────────

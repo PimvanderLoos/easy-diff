@@ -61,11 +61,24 @@
   /** Latest analysis result, or null until the user triggers analysis. */
   const analysis = $derived($analysisResult);
 
-  /** True once analysis has completed — gates the category UI. */
-  const analyzed = $derived($analysisStatus === "done");
+  /**
+   * True whenever an analysis result is available — gates the category UI.
+   * Keyed on the result, not the status, so re-running analysis (status
+   * `"running"`/`"error"`) does not disable the Filters tab while a valid
+   * prior result is still on screen.
+   */
+  const analyzed = $derived($analysisResult !== null);
 
   /** Error from the last failed run, shown as a dismissible banner. */
   const analysisErr = $derived($analysisErrorMsg);
+
+  // Reset the shared analysis stores synchronously at init — before the first
+  // render — so this PR never briefly inherits the prior PR's analysis state.
+  // (The TitleBar sibling reads these same global stores during that render.)
+  // A previously cached result is re-surfaced from `onMount` below.
+  analysisResult.set(null);
+  analysisStatus.set("idle");
+  analysisErrorMsg.set(null);
 
   // ── Raw diff state ────────────────────────────────────────────────────────
 
@@ -108,12 +121,6 @@
 
   onMount(async () => {
     if (!pr) return;
-
-    // Start from a clean slate so this PR does not inherit a prior PR's
-    // analysis state (the analysis stores are shared across PR mounts).
-    analysisResult.set(null);
-    analysisStatus.set("idle");
-    analysisErrorMsg.set(null);
 
     // Fetch the parsed diff first so the code renders immediately (no LLM).
     try {
@@ -727,7 +734,10 @@
             color: var(--ed-text);
           "
         >
-          <span class="flex-1 min-w-0 truncate">Analysis failed: {analysisErr}</span>
+          <span
+            class="flex-1 min-w-0 truncate"
+            title="Analysis failed: {analysisErr}"
+          >Analysis failed: {analysisErr}</span>
           <button
             type="button"
             onclick={handleRetryAnalysis}

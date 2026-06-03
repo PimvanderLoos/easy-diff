@@ -70,13 +70,7 @@ src/
 
 ## STATE.md Management
 
-Run the `update-state` skill (or perform an equivalent update to `.plan/STATE.md`):
-- after every large/significant change,
-- before the final commit of a logically-grouped set of commits (not before every
-  small commit), and
-- at the end of every coding session.
-
-Each update must cover all five points:
+At the end of every coding session, update `.plan/STATE.md` with:
 1. What was completed
 2. What is in progress
 3. Any decisions made that diverge from the plan

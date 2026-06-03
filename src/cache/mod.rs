@@ -33,6 +33,7 @@
 //! ```
 
 use std::path::Path;
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -143,6 +144,12 @@ impl CacheStore {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
+        // Wait/retry on a locked database instead of failing immediately with
+        // SQLITE_BUSY: each Tauri command opens its own connection, and analysis
+        // writes from a background thread can contend with interactive writes
+        // (e.g. marking a file reviewed). A user action must never be dropped
+        // just because another write held the lock for a moment.
+        conn.busy_timeout(Duration::from_secs(5))?;
         let store = Self { conn };
         store.init_schema()?;
         Ok(store)
@@ -188,6 +195,10 @@ impl CacheStore {
                 viewed_at TEXT NOT NULL,
                 PRIMARY KEY (pr_id, file_path)
             );
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS review_comments (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 pr_id      TEXT    NOT NULL,
@@ -211,6 +222,23 @@ impl CacheStore {
         Ok(())
     }
 
+    /// Records that the cache was opened this session by upserting
+    /// `last_opened_at` (current UTC timestamp) and `app_version` into the
+    /// `meta` table.
+    ///
+    /// The write also serves as a writability probe: call it right after
+    /// [`CacheStore::open`] to confirm the database can actually be written to,
+    /// not merely opened.
+    pub fn record_open(&self) -> Result<(), CacheError> {
+        let now = chrono_now();
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('last_opened_at', ?1), ('app_version', ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![now, env!("CARGO_PKG_VERSION")],
+        )?;
+        Ok(())
+    }
+
     /// Records that `file_path` in PR `pr_id` was viewed at `head_sha`.
     ///
     /// Uses `INSERT OR REPLACE` so calling this twice for the same file
@@ -226,6 +254,18 @@ impl CacheStore {
             "INSERT OR REPLACE INTO viewed_files (pr_id, file_path, head_sha, viewed_at)
              VALUES (?1, ?2, ?3, ?4)",
             params![pr_id, file_path, head_sha, now],
+        )?;
+        Ok(())
+    }
+
+    /// Removes the viewed record for `(pr_id, file_path)`, if one exists.
+    ///
+    /// Used when a file is unmarked as reviewed. Succeeds as a no-op when no
+    /// record exists.
+    pub fn unmark_viewed(&self, pr_id: &str, file_path: &str) -> Result<(), CacheError> {
+        self.conn.execute(
+            "DELETE FROM viewed_files WHERE pr_id = ?1 AND file_path = ?2",
+            params![pr_id, file_path],
         )?;
         Ok(())
     }
@@ -928,6 +968,32 @@ mod tests {
     }
 
     #[test]
+    fn unmark_viewed_removes_record() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+        store.mark_viewed("42", "src/auth.rs", "sha-abc").unwrap();
+
+        // execute
+        store.unmark_viewed("42", "src/auth.rs").unwrap();
+        let sha = store.get_viewed_sha("42", "src/auth.rs").unwrap();
+
+        // verify — record is gone
+        assert!(sha.is_none());
+    }
+
+    #[test]
+    fn unmark_viewed_is_noop_when_absent() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute — unmarking a never-viewed file must not error
+        let result = store.unmark_viewed("42", "src/never_viewed.rs");
+
+        // verify
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn get_viewed_sha_returns_none_when_not_viewed() {
         // setup
         let store = CacheStore::open_in_memory().unwrap();
@@ -954,6 +1020,52 @@ mod tests {
         assert_eq!(viewed.len(), 2);
         assert_eq!(viewed[0], ("src/a.rs".to_owned(), "sha-a".to_owned()));
         assert_eq!(viewed[1], ("src/b.rs".to_owned(), "sha-b".to_owned()));
+    }
+
+    #[test]
+    fn record_open_writes_meta() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute
+        store.record_open().unwrap();
+
+        // verify — app_version matches the crate version; last_opened recorded
+        let version: String = store
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'app_version'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, env!("CARGO_PKG_VERSION"));
+        let opened: String = store
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'last_opened_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!opened.is_empty());
+    }
+
+    #[test]
+    fn record_open_upserts_single_row_per_key() {
+        // setup
+        let store = CacheStore::open_in_memory().unwrap();
+
+        // execute — call twice; must upsert, not duplicate rows
+        store.record_open().unwrap();
+        store.record_open().unwrap();
+
+        // verify — exactly one row per key (last_opened_at + app_version)
+        let count: i64 = store
+            .conn
+            .query_row("SELECT count(*) FROM meta", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]

@@ -30,6 +30,7 @@
     categoryOverrides,
     resetReviewSession,
     helpOpen,
+    reportError,
   } from "../stores.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
@@ -107,8 +108,11 @@
       if (cached) {
         analysis = cached;
       }
-    } catch {
-      // No cached result; proceed to run analysis.
+    } catch (e) {
+      // A cache-read error here is recoverable: we fall through to a fresh
+      // run_analysis below, which surfaces its own failure via analysisError.
+      // Log so it is never fully silent.
+      console.warn("[easy-diff] get_analysis failed; running fresh analysis", e);
     }
 
     if (!analysis) {
@@ -129,8 +133,9 @@
       rawDiff = await invoke<RawDiffFile[]>("get_diff", {
         prNumber: pr.number,
       });
-    } catch {
-      // Diff unavailable — file panels will show empty hunks.
+    } catch (e) {
+      // Diff unavailable — file panels will show empty hunks. Surface it.
+      reportError("Could not load the diff for this PR", e);
     }
 
     // Load draft comments and category overrides from the local cache.
@@ -138,8 +143,8 @@
     try {
       const loaded = await invoke<ReviewComment[]>("list_comments", { prId });
       draftComments.set(loaded);
-    } catch {
-      // No comments yet; ignore.
+    } catch (e) {
+      reportError("Could not load saved draft comments", e);
     }
     try {
       const loaded = await invoke<CategoryOverride[]>("get_category_overrides", {
@@ -148,8 +153,22 @@
       categoryOverrides.set(
         new Map(loaded.map((ov) => [ov.hunk_id, ov])),
       );
-    } catch {
-      // No overrides yet; ignore.
+    } catch (e) {
+      reportError("Could not load saved category overrides", e);
+    }
+
+    // Restore persisted reviewed-file state (files reviewed at the current head SHA).
+    // Reset first: reviewedFiles is a shared module store reused across PR mounts,
+    // so a failed restore must not leak the previously opened PR's reviewed set.
+    reviewedFiles.set(new Set());
+    try {
+      const reviewed = await invoke<string[]>("get_reviewed_files", {
+        prId,
+        headSha: pr.head_sha,
+      });
+      reviewedFiles.set(new Set(reviewed));
+    } catch (e) {
+      reportError("Could not restore reviewed-file state", e);
     }
   });
 
@@ -316,11 +335,24 @@
   const reviewedSet = $derived($reviewedFiles);
   const expandedSet = $derived($expandedFiles);
 
-  function toggleReviewed(path: string) {
+  /**
+   * Serial queue for `set_reviewed` persistence writes. Each toggle is chained
+   * onto the previous one so the writes complete in enqueue order, even when the
+   * user toggles rapidly. Without this, in-flight `set_reviewed` invocations can
+   * complete out of order and leave the persisted SQLite state inconsistent with
+   * the final UI state. The chain is never awaited, so the UI is not blocked.
+   */
+  let reviewedWriteQueue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Applies the reviewed state for `path` to the in-memory stores: updates the
+   * reviewed set and auto-collapses (when reviewed) or re-expands (when not).
+   * Used for both the optimistic update and the revert when persistence fails.
+   */
+  function applyReviewed(path: string, reviewed: boolean) {
     reviewedFiles.update((prev) => {
       const next = new Set(prev);
-      const willBeReviewed = !next.has(path);
-      if (willBeReviewed) {
+      if (reviewed) {
         next.add(path);
         // Auto-collapse when marked reviewed.
         expandedFiles.update((es) => {
@@ -335,6 +367,36 @@
       }
       return next;
     });
+  }
+
+  function toggleReviewed(path: string) {
+    const willBeReviewed = !reviewedSet.has(path);
+
+    // Optimistically update the UI immediately for responsiveness.
+    applyReviewed(path, willBeReviewed);
+
+    if (!pr) return;
+
+    // Persist reviewed state, keyed to the current head SHA so it survives
+    // reopening the PR. Serialized via reviewedWriteQueue so the last toggle
+    // wins. On failure we never fail silently: revert the optimistic UI so it
+    // reflects what was actually stored, and surface the error to the user.
+    const prId = String(pr.number);
+    const headSha = pr.head_sha;
+    reviewedWriteQueue = reviewedWriteQueue.catch(() => {}).then(() =>
+      invoke("set_reviewed", {
+        prId,
+        filePath: path,
+        headSha,
+        reviewed: willBeReviewed,
+      }).catch((e) => {
+        applyReviewed(path, !willBeReviewed);
+        reportError(
+          `Could not ${willBeReviewed ? "mark" : "unmark"} "${path}" as reviewed — reverted`,
+          e,
+        );
+      }),
+    );
   }
 
   function toggleExpanded(path: string) {
@@ -392,8 +454,8 @@
         });
         return next;
       });
-    } catch {
-      // Override failed silently; UI retains previous state.
+    } catch (e) {
+      reportError(`Could not change the category for "${filePath}"`, e);
     }
   }
 
@@ -423,8 +485,8 @@
         });
         return next;
       });
-    } catch {
-      // Override failed silently; UI retains previous state.
+    } catch (e) {
+      reportError(`Could not change the tags for "${filePath}"`, e);
     }
   }
 

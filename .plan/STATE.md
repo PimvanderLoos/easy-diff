@@ -309,6 +309,9 @@
   a `tokio::task::spawn_blocking` closure that builds its own
   `current_thread` runtime. No cache is passed to the GUI engine (result
   returned directly); the CLI path continues to handle caching.
+  **Resolved post-MVP** (see "GUI cache + reviewed-state persistence" below):
+  the cache is now opened *inside* the `spawn_blocking` closure and passed to
+  the engine, so analysis is persisted while the `!Send` constraint still holds.
 - **`list_pull_requests` bug fixed**: The pre-existing `list_pull_requests` Tauri
   command was calling `create_github_provider` with only 1 argument and without
   `.await`. Fixed as part of Epic 8 PR-0 since it was discovered during the
@@ -498,3 +501,40 @@
   Files: `src/platform/github_gh.rs`, `src/platform/github_provider.rs`,
   `src/platform/mod.rs`, `src/config/mod.rs`, `src/git/mod.rs`, `src/main.rs`,
   `tests/cli.rs`.
+
+- **GUI cache + reviewed-state persistence** — the GUI persisted nothing across
+  sessions: analysing a PR left `analysis.db` empty, reopening re-ran the full
+  analysis, and "reviewed" marks were lost on close.
+  - **Analysis now cached**: `run_analysis` opens the `CacheStore` *inside* the
+    `spawn_blocking` closure and passes `Some(cache)` (was `None`). The `!Send`
+    store never crosses an `.await`, so the Send constraint still holds. Reopen
+    is now a `get_analysis` cache hit instead of a fresh re-analysis. This
+    reverses the Epic 8 "no cache passed to the GUI engine" divergence.
+  - **Reviewed state now persisted**: reuses the SHA-aware `viewed_files` table
+    (reviewed = viewed at the current head SHA, so it resets when the PR gains
+    new commits). Added `CacheStore::unmark_viewed`; new `set_reviewed` /
+    `get_reviewed_files` Tauri commands. `ReviewScreen.svelte` seeds
+    `reviewedFiles` on mount and persists each toggle (was in-memory only).
+  - **Fail-fast on unwritable cache** (review follow-up): the GUI no longer
+    swallows a cache-open failure with `.ok()`. A new `meta(key, value)` table +
+    `CacheStore::record_open()` (upserts `last_opened_at` + `app_version`) act as
+    a writability probe; `gui::run()` runs it at startup and, on failure, shows a
+    native error dialog (`rfd`, gated under the `gui` feature) and exits instead
+    of launching and silently dropping data. `run_analysis` now logs a prominent
+    warning rather than degrading silently mid-session.
+  - **No silent failures** (review follow-up): codified a "Never Fail Silently"
+    rule in `CLAUDE.md`. `CacheStore::open` now sets a 5s `busy_timeout` so
+    contended writes wait/retry instead of failing instantly with `SQLITE_BUSY`.
+    Added a global error-toast surface (`reportError`/`dismissToast`/`errorToasts`
+    in `stores.ts`, rendered by new `Toasts.svelte` at the app root). `set_reviewed`
+    now reverts the optimistic UI and toasts on failure; `set_category_override`,
+    `delete_comment`, and the on-mount load failures (diff, comments, overrides,
+    reviewed restore) now surface errors instead of swallowing them.
+  - Files: `src/cache/mod.rs`, `src/gui/mod.rs`, `Cargo.toml`, `CLAUDE.md`,
+    `frontend/src/lib/stores.ts`, `frontend/src/lib/components/Toasts.svelte`,
+    `frontend/src/App.svelte`, `frontend/src/lib/components/ReviewScreen.svelte`,
+    `frontend/src/lib/components/DraftComment.svelte`. Four new cache unit tests
+    (`unmark_viewed_removes_record`, `unmark_viewed_is_noop_when_absent`,
+    `record_open_writes_meta`, `record_open_upserts_single_row_per_key`).
+    `cargo test`, `cargo clippy --all-targets -- -D warnings`,
+    `cargo fmt --check`, `npm run check`, and `npm run build` all pass.

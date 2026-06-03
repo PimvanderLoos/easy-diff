@@ -128,6 +128,47 @@ export const categoryOverrides = writable<Map<string, CategoryOverride>>(
   new Map(),
 );
 
+// ── Error reporting ─────────────────────────────────────────────────────────
+
+/** A user-visible error notification rendered by `Toasts.svelte`. */
+export interface ErrorToast {
+  /** Stable id used as the `{#each}` key and for dismissal. */
+  id: number;
+  /** Short, human-readable description of what failed. */
+  message: string;
+  /** Optional underlying cause (stringified error), shown as secondary text. */
+  detail?: string;
+}
+
+/**
+ * Active error toasts. Append-only via {@link reportError}; entries are removed
+ * by {@link dismissToast} (user click) or after an auto-dismiss timeout.
+ */
+export const errorToasts = writable<ErrorToast[]>([]);
+
+let toastSeq = 0;
+
+/**
+ * Reports a failed operation so it is never silent: logs to the console and
+ * surfaces a visible toast. Use this in every `catch` of an operation that
+ * saves, stores, or reacts to a user interaction.
+ *
+ * @param message Short description of what the user was trying to do.
+ * @param cause   The caught error (or any value); stringified for the detail line.
+ */
+export function reportError(message: string, cause?: unknown): void {
+  console.error(`[easy-diff] ${message}`, cause);
+  const detail =
+    cause === undefined || cause === null ? undefined : String(cause);
+  const id = ++toastSeq;
+  errorToasts.update((list) => [...list, { id, message, detail }]);
+}
+
+/** Removes the toast with the given id (no-op if already gone). */
+export function dismissToast(id: number): void {
+  errorToasts.update((list) => list.filter((t) => t.id !== id));
+}
+
 /**
  * Resets all review-scoped stores to their initial values.
  *

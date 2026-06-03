@@ -17,6 +17,7 @@
   import PrSelectionScreen from "./lib/components/PrSelectionScreen.svelte";
   import ReviewScreen from "./lib/components/ReviewScreen.svelte";
   import KeyboardShortcutsDialog from "./lib/components/KeyboardShortcutsDialog.svelte";
+  import Toasts from "./lib/components/Toasts.svelte";
   import { currentScreen, selectedPr, theme, helpOpen } from "./lib/stores.js";
   import type { RepoInfo, CurrentUser } from "./lib/types.js";
 
@@ -90,3 +91,5 @@
 {#if $helpOpen}
   <KeyboardShortcutsDialog onClose={() => helpOpen.set(false)} />
 {/if}
+
+<Toasts />

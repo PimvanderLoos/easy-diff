@@ -137,12 +137,24 @@ async fn run_analysis(pr_number: u64) -> Result<AnalysisResult, String> {
             .map_err(|e| e.to_string())?;
 
         rt.block_on(async move {
+            // Persist analysis to the same cache the CLI and `get_analysis` use, so
+            // reopening the PR is a cache hit instead of a fresh re-analysis. The
+            // !Send `CacheStore` stays on this blocking thread and never crosses an
+            // `.await` on the Send side, so the original Send constraint still holds.
+            let db_path = root.join(".easy-diff").join("cache").join("analysis.db");
+            let cache = match CacheStore::open(&db_path) {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    warn_cache_unwritable(&db_path, &e);
+                    None
+                }
+            };
             let engine = AnalysisEngine::new(
                 dispatcher,
                 prefs.large_pr_threshold,
                 5,
                 prefs.max_file_context,
-                None, // no cache — GUI returns result directly
+                cache,
                 false,
                 root,
             );
@@ -307,6 +319,25 @@ fn open_cache() -> Result<CacheStore, String> {
     CacheStore::open(&db_path).map_err(|e| e.to_string())
 }
 
+/// Logs a prominent, multi-line warning that the per-repo cache could not be
+/// opened or written, so the user knows analysis results and review progress
+/// will not be saved this session (rather than failing silently).
+fn warn_cache_unwritable(path: &std::path::Path, err: &impl std::fmt::Display) {
+    tracing::warn!(
+        "\n\
+         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\
+         !! easy-diff: CACHE NOT WRITABLE\n\
+         !!   path : {}\n\
+         !!   cause: {}\n\
+         !! Analysis results and review progress will NOT be saved this\n\
+         !! session. Fix the path's permissions / free disk space, then\n\
+         !! restart easy-diff.\n\
+         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        path.display(),
+        err
+    );
+}
+
 /// Adds a new draft review comment on a line (or line range) within a file.
 ///
 /// Returns the persisted [`ReviewComment`] with its database-assigned `id`.
@@ -396,6 +427,49 @@ fn set_category_override(
 fn get_category_overrides(pr_id: String) -> Result<Vec<CategoryOverride>, String> {
     let cache = open_cache()?;
     cache.get_overrides(&pr_id).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Reviewed-state Tauri commands
+// ---------------------------------------------------------------------------
+
+/// Persists whether `file_path` in PR `pr_id` is marked reviewed at `head_sha`.
+///
+/// Reviewed state reuses the SHA-aware `viewed_files` table: marking reviewed
+/// records the current head SHA, so the file reverts to unreviewed once the PR
+/// gains new commits. Unmarking deletes the record.
+#[tauri::command]
+fn set_reviewed(
+    pr_id: String,
+    file_path: String,
+    head_sha: String,
+    reviewed: bool,
+) -> Result<(), String> {
+    let cache = open_cache()?;
+    if reviewed {
+        cache
+            .mark_viewed(&pr_id, &file_path, &head_sha)
+            .map_err(|e| e.to_string())
+    } else {
+        cache
+            .unmark_viewed(&pr_id, &file_path)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Returns the file paths in PR `pr_id` that are marked reviewed at `head_sha`.
+///
+/// Files reviewed at a different (older) head SHA are excluded, so the result
+/// reflects only the changes the user has reviewed at the current revision.
+#[tauri::command]
+fn get_reviewed_files(pr_id: String, head_sha: String) -> Result<Vec<String>, String> {
+    let cache = open_cache()?;
+    let viewed = cache.list_viewed(&pr_id).map_err(|e| e.to_string())?;
+    Ok(viewed
+        .into_iter()
+        .filter(|(_, sha)| sha == &head_sha)
+        .map(|(path, _)| path)
+        .collect())
 }
 
 /// Submits the accumulated draft comments as a GitHub pull request review.
@@ -557,6 +631,33 @@ async fn submit_review(
 /// runtime).  This mirrors the idiomatic Tauri pattern of calling `.expect()`
 /// on the final `run()` call.
 pub fn run() {
+    // Probe the per-repo cache up front: a successful write here means analysis
+    // results and review progress can be saved this session. If it fails, show
+    // the user a native error dialog and exit rather than silently dropping
+    // their data. `record_open` performs a real write, so it doubles as the
+    // writability check.
+    if let Ok(repo) = git::detect_repo_info(".") {
+        let db_path = repo
+            .root
+            .join(".easy-diff")
+            .join("cache")
+            .join("analysis.db");
+        if let Err(e) = CacheStore::open(&db_path).and_then(|c| c.record_open()) {
+            let _ = rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("easy-diff — cache not writable")
+                .set_description(format!(
+                    "easy-diff cannot write to its cache:\n\n{}\n\ncause: {e}\n\n\
+                     Analysis results and review progress could not be saved. Fix the \
+                     path's permissions or free up disk space, then reopen easy-diff.",
+                    db_path.display()
+                ))
+                .show();
+            std::process::exit(1);
+        }
+        tracing::info!(path = %db_path.display(), "cache ready");
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             list_pull_requests,
@@ -573,6 +674,8 @@ pub fn run() {
             delete_comment,
             set_category_override,
             get_category_overrides,
+            set_reviewed,
+            get_reviewed_files,
             submit_review,
         ])
         .run(tauri::generate_context!())

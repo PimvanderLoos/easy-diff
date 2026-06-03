@@ -7,7 +7,7 @@ reviewable way.
 
 See `.plan/PLAN.md` for the full project vision and feature specification.
 See `.plan/ROADMAP.md` for the epic breakdown and implementation order.
-See `.plan/STATE.md` for current progress — **update this file at the end of every session**.
+See `.plan/STATE.md` for current progress — **update this file at the end of every session** - **Read this file for every new session and after every compact**
 
 ## Tech Stack
 
@@ -67,6 +67,29 @@ src/
 - PR plan files in `.plan/` are the spec. If implementation diverges, document the divergence in `STATE.md`, do not silently modify the plan files.
 - When in doubt about a design decision, add it to the `Open Questions` section of the relevant PR plan rather than guessing.
 - Add project files to git when you create them.
+
+## Never Fail Silently
+
+**Any operation that saves, stores, or reacts to a user interaction must never
+fail silently.** This is non-negotiable.
+
+When such an operation can fail:
+1. **Try its best first.** Use the platform's built-in resilience (e.g. SQLite
+   `busy_timeout` so contended writes wait/retry rather than erroring), or an
+   explicit retry/backoff where appropriate. Only treat it as failed once those
+   are exhausted.
+2. **Log it.** Backend: `tracing::error!`/`warn!`. Frontend: `console.error`.
+3. **Show it.** Surface a visible error to the user — a toast (`reportError` in
+   `stores.ts`), an inline message, or a native dialog. The user must know their
+   action did not take effect.
+4. **Revert optimistic UI.** If the UI was updated optimistically (e.g. toggling
+   "mark as reviewed"), roll it back to its pre-interaction state on failure so
+   the UI always reflects what was actually persisted.
+
+Forbidden: empty `catch {}`, `.catch(() => {})`, or any comment of the form
+"failed silently; ignore". A genuinely-empty result (e.g. "no cached data yet")
+is not a failure and may be tolerated — but a thrown error from a save/load must
+always be surfaced.
 
 ## STATE.md Management
 

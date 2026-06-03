@@ -2,7 +2,8 @@
   /**
    * Application title bar — three-column grid header.
    *
-   * Left: brand mark (diamond SVG) + "easydiff" wordmark.
+   * Left: brand mark (diamond SVG) that doubles as the analysis trigger on the
+   *   review screen — "Analyze PR" / "Analyzing…" (spinning) / "Re-analyze".
    * Center: repo/PR breadcrumb in IBM Plex Mono.
    * Right: theme toggle + help button (?) + user avatar.
    *
@@ -10,6 +11,8 @@
    */
 
   import Avatar from "./Avatar.svelte";
+  import { currentScreen, selectedPr, analysisStatus } from "../stores.js";
+  import { runAnalysis } from "../analysisController.js";
 
   interface Props {
     /** Repository owner/name string, e.g. "atelier-io/api". */
@@ -39,6 +42,29 @@
   }: Props = $props();
 
   const repoParts = $derived(repoPath ? repoPath.split("/") : []);
+
+  // ── Analysis trigger (review screen only) ──────────────────────────────────
+
+  const pr = $derived($selectedPr);
+
+  /** The brand acts as the analyze button only while reviewing a PR. */
+  const isReview = $derived($currentScreen === "review" && pr !== null);
+
+  /** Whether analysis is currently running (drives the spinning logo). */
+  const analyzing = $derived($analysisStatus === "running");
+
+  /** Button label reflecting the analysis lifecycle. */
+  const analyzeLabel = $derived(
+    $analysisStatus === "running"
+      ? "Analyzing…"
+      : $analysisStatus === "done" || $analysisStatus === "error"
+        ? "Re-analyze"
+        : "Analyze PR",
+  );
+
+  function handleAnalyzeClick() {
+    if (pr && !analyzing) runAnalysis(pr.number);
+  }
 </script>
 
 <header
@@ -50,9 +76,10 @@
     padding: 0 18px;
   "
 >
-  <!-- Left: brand mark + wordmark -->
-  <div class="flex items-center gap-2.5">
+  <!-- Left: brand mark (doubles as the analyze button on the review screen) -->
+  {#snippet diamond(spin: boolean)}
     <svg
+      class={spin ? "ed-logo-spin" : ""}
       width="22"
       height="22"
       viewBox="0 0 22 22"
@@ -68,13 +95,33 @@
       />
       <circle cx="11" cy="11" r="2.4" fill="var(--ed-text)" />
     </svg>
-    <span
-      class="text-ed-text"
-      style="font-size: 15px; font-weight: 700; letter-spacing: -0.3px;"
+  {/snippet}
+
+  {#if isReview}
+    <button
+      type="button"
+      onclick={handleAnalyzeClick}
+      disabled={analyzing}
+      aria-label={analyzing ? "Analyzing pull request" : analyzeLabel}
+      class="flex items-center gap-2.5 border-none bg-transparent p-0 text-ed-text"
+      style="cursor: {analyzing ? 'default' : 'pointer'};"
     >
-      easydiff
-    </span>
-  </div>
+      {@render diamond(analyzing)}
+      <span style="font-size: 15px; font-weight: 700; letter-spacing: -0.3px;">
+        {analyzeLabel}
+      </span>
+    </button>
+  {:else}
+    <div class="flex items-center gap-2.5">
+      {@render diamond(false)}
+      <span
+        class="text-ed-text"
+        style="font-size: 15px; font-weight: 700; letter-spacing: -0.3px;"
+      >
+        easydiff
+      </span>
+    </div>
+  {/if}
 
   <!-- Center: breadcrumb -->
   <div
@@ -144,3 +191,24 @@
     {/if}
   </div>
 </header>
+
+<style>
+  /* Gentle, continuous rotation of the brand mark while analysis runs. */
+  @keyframes ed-logo-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .ed-logo-spin {
+    transform-origin: 50% 50%;
+    animation: ed-logo-spin 2.5s linear infinite;
+  }
+
+  /* Respect users who prefer reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .ed-logo-spin {
+      animation: none;
+    }
+  }
+</style>

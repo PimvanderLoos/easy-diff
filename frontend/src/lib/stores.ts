@@ -15,6 +15,7 @@
 
 import { writable } from "svelte/store";
 import type {
+  AnalysisResult,
   FilterState,
   PullRequest,
   ReviewComment,
@@ -128,6 +129,35 @@ export const categoryOverrides = writable<Map<string, CategoryOverride>>(
   new Map(),
 );
 
+// ── Analysis trigger state ─────────────────────────────────────────────────
+
+/**
+ * Lifecycle of the LLM analysis for the currently open PR.
+ *
+ * - `"idle"`   — analysis has never been run for this PR (button: "Analyze PR").
+ * - `"running"`— analysis is in flight (button: "Analyzing…", logo spins).
+ * - `"done"`   — analysis completed and {@link analysisResult} is populated
+ *                (button: "Re-analyze").
+ * - `"error"`  — the last run failed; {@link analysisErrorMsg} holds the reason
+ *                (button: "Re-analyze", a dismissible banner is shown).
+ */
+export type AnalysisStatus = "idle" | "running" | "done" | "error";
+
+/**
+ * Latest analysis result for the open PR, or `null` until analysis has run.
+ *
+ * Drives the per-hunk classifications, attention tags, and risk markers in the
+ * review screen. Lifted to a store so the TitleBar "Analyze" button (a sibling
+ * of the review screen) can both trigger analysis and reflect its outcome.
+ */
+export const analysisResult = writable<AnalysisResult | null>(null);
+
+/** Current {@link AnalysisStatus} for the open PR. */
+export const analysisStatus = writable<AnalysisStatus>("idle");
+
+/** Human-readable error from the last failed analysis run, or `null`. */
+export const analysisErrorMsg = writable<string | null>(null);
+
 // ── Error reporting ─────────────────────────────────────────────────────────
 
 /** A user-visible error notification rendered by `Toasts.svelte`. */
@@ -186,4 +216,7 @@ export function resetReviewSession(): void {
   focusedHunkId.set(null);
   draftComments.set([]);
   categoryOverrides.set(new Map());
+  analysisResult.set(null);
+  analysisStatus.set("idle");
+  analysisErrorMsg.set(null);
 }

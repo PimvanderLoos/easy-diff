@@ -46,6 +46,11 @@
     onFilterChange: (next: FilterState) => void;
     /** Called when the user clicks "back to PR list". */
     onBack: () => void;
+    /**
+     * Whether analysis has completed. When false, the analysis-dependent UI
+     * (Filters tab, "Suggest filters") is greyed out and disabled.
+     */
+    analyzed?: boolean;
   }
 
   let {
@@ -61,12 +66,18 @@
     filter,
     onFilterChange,
     onBack,
+    analyzed = false,
   }: Props = $props();
 
   // ── Tab state ─────────────────────────────────────────────────────────────
 
   type Tab = "files" | "filters";
   let activeTab = $state<Tab>("files");
+
+  // Filters require analysis; fall back to the Files tab when not analysed.
+  $effect(() => {
+    if (!analyzed && activeTab === "filters") activeTab = "files";
+  });
 
   // ── Progress ──────────────────────────────────────────────────────────────
 
@@ -156,14 +167,18 @@
     </button>
     <button
       type="button"
-      onclick={() => (activeTab = "filters")}
-      class="cursor-pointer border-none bg-transparent py-2.5 text-[13px]"
+      onclick={() => analyzed && (activeTab = "filters")}
+      disabled={!analyzed}
+      title={analyzed ? undefined : "Run analysis to enable filters"}
+      class="border-none bg-transparent py-2.5 text-[13px]"
       style="
         font-family: var(--font-sans);
         font-weight: {activeTab === 'filters' ? 600 : 500};
         color: {activeTab === 'filters' ? 'var(--ed-text)' : 'var(--ed-text-muted)'};
         border-bottom: 2px solid {activeTab === 'filters' ? 'var(--ed-accent)' : 'transparent'};
         padding-bottom: 10px;
+        cursor: {analyzed ? 'pointer' : 'not-allowed'};
+        opacity: {analyzed ? 1 : 0.45};
       "
     >
       Filters
@@ -193,12 +208,16 @@
   >
     <button
       type="button"
-      class="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-transparent text-[12.5px] font-medium text-ed-accent"
+      disabled={!analyzed}
+      title={analyzed ? undefined : "Run analysis to enable filter suggestions"}
+      class="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-transparent text-[12.5px] font-medium text-ed-accent"
       style="
         padding: 8px 10px;
         border: 1px dashed var(--ed-border);
         font-family: var(--font-sans);
         white-space: nowrap;
+        cursor: {analyzed ? 'pointer' : 'not-allowed'};
+        opacity: {analyzed ? 1 : 0.45};
       "
     >
       <span style="font-size: 14px; line-height: 1;">+</span>

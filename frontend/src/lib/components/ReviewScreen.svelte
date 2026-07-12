@@ -31,7 +31,11 @@
     resetReviewSession,
     helpOpen,
     reportError,
+    analysisResult,
+    analysisStatus,
+    analysisErrorMsg,
   } from "../stores.js";
+  import { runAnalysis } from "../analysisController.js";
   import LeftRail from "./LeftRail.svelte";
   import MainToolbar from "./MainToolbar.svelte";
   import FilePanel from "./FilePanel.svelte";
@@ -52,11 +56,29 @@
 
   const pr = $derived($selectedPr);
 
-  // ── Analysis state ────────────────────────────────────────────────────────
+  // ── Analysis state (driven by the analysis stores) ────────────────────────
 
-  let analysis = $state<AnalysisResult | null>(null);
-  let analysisError = $state<string | null>(null);
-  let analysisLoading = $state(false);
+  /** Latest analysis result, or null until the user triggers analysis. */
+  const analysis = $derived($analysisResult);
+
+  /**
+   * True whenever an analysis result is available — gates the category UI.
+   * Keyed on the result, not the status, so re-running analysis (status
+   * `"running"`/`"error"`) does not disable the Filters tab while a valid
+   * prior result is still on screen.
+   */
+  const analyzed = $derived($analysisResult !== null);
+
+  /** Error from the last failed run, shown as a dismissible banner. */
+  const analysisErr = $derived($analysisErrorMsg);
+
+  // Reset the shared analysis stores synchronously at init — before the first
+  // render — so this PR never briefly inherits the prior PR's analysis state.
+  // (The TitleBar sibling reads these same global stores during that render.)
+  // A previously cached result is re-surfaced from `onMount` below.
+  analysisResult.set(null);
+  analysisStatus.set("idle");
+  analysisErrorMsg.set(null);
 
   // ── Raw diff state ────────────────────────────────────────────────────────
 
@@ -100,35 +122,7 @@
   onMount(async () => {
     if (!pr) return;
 
-    // Load cached analysis, or trigger a fresh run.
-    try {
-      const cached = await invoke<AnalysisResult | null>("get_analysis", {
-        prNumber: pr.number,
-      });
-      if (cached) {
-        analysis = cached;
-      }
-    } catch (e) {
-      // A cache-read error here is recoverable: we fall through to a fresh
-      // run_analysis below, which surfaces its own failure via analysisError.
-      // Log so it is never fully silent.
-      console.warn("[easy-diff] get_analysis failed; running fresh analysis", e);
-    }
-
-    if (!analysis) {
-      analysisLoading = true;
-      try {
-        analysis = await invoke<AnalysisResult>("run_analysis", {
-          prNumber: pr.number,
-        });
-      } catch (e) {
-        analysisError = String(e);
-      } finally {
-        analysisLoading = false;
-      }
-    }
-
-    // Fetch the parsed diff independently (no LLM needed).
+    // Fetch the parsed diff first so the code renders immediately (no LLM).
     try {
       rawDiff = await invoke<RawDiffFile[]>("get_diff", {
         prNumber: pr.number,
@@ -136,6 +130,21 @@
     } catch (e) {
       // Diff unavailable — file panels will show empty hunks. Surface it.
       reportError("Could not load the diff for this PR", e);
+    }
+
+    // Surface a previously cached analysis without re-running it. Analysis is
+    // otherwise user-triggered via the TitleBar "Analyze" button.
+    try {
+      const cached = await invoke<AnalysisResult | null>("get_analysis", {
+        prNumber: pr.number,
+      });
+      if (cached) {
+        analysisResult.set(cached);
+        analysisStatus.set("done");
+      }
+    } catch (e) {
+      // A cache miss returns null (no throw); a thrown error is a real failure.
+      reportError("Could not load cached analysis", e);
     }
 
     // Load draft comments and category overrides from the local cache.
@@ -171,6 +180,19 @@
       reportError("Could not restore reviewed-file state", e);
     }
   });
+
+  // ── Analysis trigger handlers ─────────────────────────────────────────────
+
+  /** Re-run analysis after a failure (from the error banner's Retry button). */
+  function handleRetryAnalysis() {
+    if (pr) runAnalysis(pr.number);
+  }
+
+  /** Dismiss the error banner, restoring the prior status. */
+  function dismissAnalysisError() {
+    analysisErrorMsg.set(null);
+    analysisStatus.set(analysis ? "done" : "idle");
+  }
 
   // ── Convert raw diff into frontend HunkData ───────────────────────────────
 
@@ -669,6 +691,7 @@
     {filter}
     onFilterChange={handleFilterChange}
     onBack={handleBack}
+    {analyzed}
   />
 
   <!-- Main diff area -->
@@ -692,26 +715,49 @@
       onShowShortcuts={() => helpOpen.set(true)}
     />
 
-    <!-- Diff stack / loading / error states -->
+    <!-- Diff stack — always shown; analysis runs separately in the background -->
     <div
       class="flex flex-1 flex-col overflow-auto"
       style="padding: 20px 24px 60px; gap: 16px;"
     >
-      {#if analysisLoading}
+      {#if analysisErr}
+        <!-- Non-blocking analysis error: diff stays visible below. -->
         <div
-          class="flex flex-1 items-center justify-center text-ed-text-muted"
-          style="font-size: 14px; font-family: var(--font-sans);"
+          class="flex shrink-0 items-center gap-3"
+          style="
+            background: color-mix(in srgb, var(--ed-removed) 10%, transparent);
+            border: 1px solid var(--ed-removed);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 12.5px;
+            font-family: var(--font-sans);
+            color: var(--ed-text);
+          "
         >
-          Running analysis…
+          <span
+            class="flex-1 min-w-0 truncate"
+            title="Analysis failed: {analysisErr}"
+          >Analysis failed: {analysisErr}</span>
+          <button
+            type="button"
+            onclick={handleRetryAnalysis}
+            class="shrink-0 cursor-pointer rounded border-none font-medium text-white"
+            style="background: var(--ed-accent); padding: 3px 10px; font-size: 12px;"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onclick={dismissAnalysisError}
+            class="shrink-0 cursor-pointer border-none bg-transparent text-ed-text-muted"
+            style="font-size: 16px; line-height: 1;"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
         </div>
-      {:else if analysisError}
-        <div
-          class="flex flex-1 items-center justify-center text-ed-removed"
-          style="font-size: 13px; font-family: var(--font-sans);"
-        >
-          {analysisError}
-        </div>
-      {:else if files.length > 0}
+      {/if}
+      {#if files.length > 0}
         {#each files as file (file.path)}
           <FilePanel
             {file}
